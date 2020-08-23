@@ -6,9 +6,9 @@ import (
 	"io"
 	"sort"
 
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/format/pktline"
-	"github.com/go-git/go-git/v5/plumbing/protocol/packp/capability"
+	"github.com/jesseduffield/go-git/v5/plumbing"
+	"github.com/jesseduffield/go-git/v5/plumbing/format/pktline"
+	"github.com/jesseduffield/go-git/v5/plumbing/protocol/packp/capability"
 )
 
 // Encode writes the AdvRefs encoding to a writer.

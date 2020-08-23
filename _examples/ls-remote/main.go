@@ -4,11 +4,11 @@ import (
 	"log"
 	"os"
 
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/config"
-	"github.com/go-git/go-git/v5/storage/memory"
+	"github.com/jesseduffield/go-git/v5"
+	"github.com/jesseduffield/go-git/v5/config"
+	"github.com/jesseduffield/go-git/v5/storage/memory"
 
-	. "github.com/go-git/go-git/v5/_examples"
+	. "github.com/jesseduffield/go-git/v5/_examples"
 )
 
 // Retrieve remote tags without cloning repository
