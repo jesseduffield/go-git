@@ -5,9 +5,9 @@ import (
 	"math"
 
 	fixtures "github.com/go-git/go-git-fixtures/v4"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/format/idxfile"
-	"github.com/go-git/go-git/v5/plumbing/format/packfile"
+	"github.com/jesseduffield/go-git/v5/plumbing"
+	"github.com/jesseduffield/go-git/v5/plumbing/format/idxfile"
+	"github.com/jesseduffield/go-git/v5/plumbing/format/packfile"
 	. "gopkg.in/check.v1"
 )
 

@@ -3,7 +3,7 @@ package ssh
 import (
 	"testing"
 
-	"github.com/go-git/go-git/v5/plumbing/transport"
+	"github.com/jesseduffield/go-git/v5/plumbing/transport"
 
 	"github.com/gliderlabs/ssh"
 	"github.com/kevinburke/ssh_config"

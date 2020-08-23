@@ -1,9 +1,9 @@
-module github.com/go-git/go-git/cli/go-git
+module github.com/jesseduffield/go-git/cli/go-git
 
 go 1.20
 
 require (
-	github.com/go-git/go-git/v5 v5.12.0
+	github.com/jesseduffield/go-git/v5 v5.12.0
 	github.com/jessevdk/go-flags v1.6.1
 )
 

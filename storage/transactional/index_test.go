@@ -1,8 +1,8 @@
 package transactional
 
 import (
-	"github.com/go-git/go-git/v5/plumbing/format/index"
-	"github.com/go-git/go-git/v5/storage/memory"
+	"github.com/jesseduffield/go-git/v5/plumbing/format/index"
+	"github.com/jesseduffield/go-git/v5/storage/memory"
 
 	. "gopkg.in/check.v1"
 )

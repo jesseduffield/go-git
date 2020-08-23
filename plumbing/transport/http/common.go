@@ -15,11 +15,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
-	"github.com/go-git/go-git/v5/plumbing/protocol/packp/capability"
-	"github.com/go-git/go-git/v5/plumbing/transport"
-	"github.com/go-git/go-git/v5/utils/ioutil"
+	"github.com/jesseduffield/go-git/v5/plumbing"
+	"github.com/jesseduffield/go-git/v5/plumbing/protocol/packp"
+	"github.com/jesseduffield/go-git/v5/plumbing/protocol/packp/capability"
+	"github.com/jesseduffield/go-git/v5/plumbing/transport"
+	"github.com/jesseduffield/go-git/v5/utils/ioutil"
 	"github.com/golang/groupcache/lru"
 )
 

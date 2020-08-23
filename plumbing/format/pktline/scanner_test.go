@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-git/go-git/v5/plumbing/format/pktline"
+	"github.com/jesseduffield/go-git/v5/plumbing/format/pktline"
 	"github.com/stretchr/testify/assert"
 
 	. "gopkg.in/check.v1"

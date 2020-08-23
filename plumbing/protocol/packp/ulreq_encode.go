@@ -6,8 +6,8 @@ import (
 	"io"
 	"time"
 
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/format/pktline"
+	"github.com/jesseduffield/go-git/v5/plumbing"
+	"github.com/jesseduffield/go-git/v5/plumbing/format/pktline"
 )
 
 // Encode writes the UlReq encoding of u to the stream.
