@@ -290,8 +290,6 @@ func (c *Config) Unmarshal(b []byte) error {
 	}
 	unmarshalSubmodules(c.Raw, c.Submodules)
 
-	// ignore error
-	// Why ignore the error? It seems overly strict and for my use case none of the errors matter to me
 	c.unmarshalBranches()
 
 	if err := c.unmarshalURLs(); err != nil {
@@ -387,18 +385,15 @@ func unmarshalSubmodules(fc *format.Config, submodules map[string]*Submodule) {
 	}
 }
 
-func (c *Config) unmarshalBranches() error {
+func (c *Config) unmarshalBranches() {
 	bs := c.Raw.Section(branchSection)
 	for _, sub := range bs.Subsections {
 		b := &Branch{}
 
-		if err := b.unmarshal(sub); err != nil {
-			// ignore error
-		}
+		b.unmarshal(sub)
 
 		c.Branches[b.Name] = b
 	}
-	return nil
 }
 
 func (c *Config) unmarshalInit() {

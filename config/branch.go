@@ -103,7 +103,7 @@ func quoteDescription(desc string) string {
 	return strings.ReplaceAll(desc, "\n", `\n`)
 }
 
-func (b *Branch) unmarshal(s *format.Subsection) error {
+func (b *Branch) unmarshal(s *format.Subsection) {
 	b.raw = s
 
 	b.Name = b.raw.Name
@@ -111,8 +111,6 @@ func (b *Branch) unmarshal(s *format.Subsection) error {
 	b.Merge = plumbing.ReferenceName(b.raw.Options.Get(mergeKey))
 	b.Rebase = b.raw.Options.Get(rebaseKey)
 	b.Description = unquoteDescription(b.raw.Options.Get(descriptionKey))
-
-	return b.Validate()
 }
 
 // hack to enable conditional quoting in the
