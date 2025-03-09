@@ -19,7 +19,6 @@ var (
 	// common
 	sp  = []byte(" ")
 	eol = []byte("\n")
-	eq  = []byte{'='}
 
 	// advertised-refs
 	null       = []byte("\x00")
@@ -33,6 +32,8 @@ var (
 	deepenCommits   = []byte("deepen ")
 	deepenSince     = []byte("deepen-since ")
 	deepenReference = []byte("deepen-not ")
+	have            = []byte("have ")
+	done            = []byte("done")
 
 	// shallow-update
 	unshallow = []byte("unshallow ")
@@ -48,6 +49,11 @@ var (
 func isFlush(payload []byte) bool {
 	return len(payload) == 0
 }
+
+var (
+	// ErrNilWriter is returned when a nil writer is passed to the encoder.
+	ErrNilWriter = fmt.Errorf("nil writer")
+)
 
 // ErrUnexpectedData represents an unexpected data decoding a message
 type ErrUnexpectedData struct {

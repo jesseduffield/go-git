@@ -3,28 +3,33 @@ package revision
 import (
 	"bytes"
 	"regexp"
+	"testing"
 	"time"
 
-	. "gopkg.in/check.v1"
+	"github.com/stretchr/testify/suite"
 )
 
-type ParserSuite struct{}
+type ParserSuite struct {
+	suite.Suite
+}
 
-var _ = Suite(&ParserSuite{})
+func TestParserSuite(t *testing.T) {
+	suite.Run(t, new(ParserSuite))
+}
 
-func (s *ParserSuite) TestErrInvalidRevision(c *C) {
+func (s *ParserSuite) TestErrInvalidRevision() {
 	e := ErrInvalidRevision{"test"}
 
-	c.Assert(e.Error(), Equals, "Revision invalid : test")
+	s.Equal("Revision invalid : test", e.Error())
 }
 
-func (s *ParserSuite) TestNewParserFromString(c *C) {
+func (s *ParserSuite) TestNewParserFromString() {
 	p := NewParserFromString("test")
 
-	c.Assert(p, FitsTypeOf, &Parser{})
+	s.IsType(&Parser{}, p)
 }
 
-func (s *ParserSuite) TestScan(c *C) {
+func (s *ParserSuite) TestScan() {
 	parser := NewParser(bytes.NewBufferString("Hello world !"))
 
 	expected := []struct {
@@ -60,33 +65,33 @@ func (s *ParserSuite) TestScan(c *C) {
 			return
 		}
 
-		c.Assert(err, Equals, nil)
-		c.Assert(str, Equals, expected[i].s)
-		c.Assert(tok, Equals, expected[i].t)
+		s.NoError(err)
+		s.Equal(expected[i].s, str)
+		s.Equal(expected[i].t, tok)
 
 		i++
 	}
 }
 
-func (s *ParserSuite) TestUnscan(c *C) {
+func (s *ParserSuite) TestUnscan() {
 	parser := NewParser(bytes.NewBufferString("Hello world !"))
 
 	tok, str, err := parser.scan()
 
-	c.Assert(err, Equals, nil)
-	c.Assert(str, Equals, "Hello")
-	c.Assert(tok, Equals, word)
+	s.NoError(err)
+	s.Equal("Hello", str)
+	s.Equal(word, tok)
 
 	parser.unscan()
 
 	tok, str, err = parser.scan()
 
-	c.Assert(err, Equals, nil)
-	c.Assert(str, Equals, "Hello")
-	c.Assert(tok, Equals, word)
+	s.NoError(err)
+	s.Equal("Hello", str)
+	s.Equal(word, tok)
 }
 
-func (s *ParserSuite) TestParseWithValidExpression(c *C) {
+func (s *ParserSuite) TestParseWithValidExpression() {
 	tim, _ := time.Parse("2006-01-02T15:04:05Z", "2016-12-16T21:42:47Z")
 
 	datas := map[string]Revisioner{
@@ -178,12 +183,12 @@ func (s *ParserSuite) TestParseWithValidExpression(c *C) {
 
 		result, err := parser.Parse()
 
-		c.Assert(err, Equals, nil)
-		c.Assert(result, DeepEquals, expected)
+		s.NoError(err)
+		s.Equal(expected, result)
 	}
 }
 
-func (s *ParserSuite) TestParseWithUnValidExpression(c *C) {
+func (s *ParserSuite) TestParseWithInvalidExpression() {
 	datas := map[string]error{
 		"..":                              &ErrInvalidRevision{`must not start with "."`},
 		"master^1master":                  &ErrInvalidRevision{`reference must be defined once at the beginning`},
@@ -198,16 +203,19 @@ func (s *ParserSuite) TestParseWithUnValidExpression(c *C) {
 		"~1":                              &ErrInvalidRevision{`"~" or "^" statement must have a reference defined at the beginning`},
 		"master:/test":                    &ErrInvalidRevision{`":" statement is not valid, could be : :/<regexp>`},
 		"master:0:README":                 &ErrInvalidRevision{`":" statement is not valid, could be : :<n>:<path>`},
+		"^{/":                             &ErrInvalidRevision{`missing "}" in ^{<data>} structure`},
+		"~@{":                             &ErrInvalidRevision{`missing "}" in @{<data>} structure`},
+		"@@{{0":                           &ErrInvalidRevision{`missing "}" in @{<data>} structure`},
 	}
 
-	for s, e := range datas {
-		parser := NewParser(bytes.NewBufferString(s))
+	for st, e := range datas {
+		parser := NewParser(bytes.NewBufferString(st))
 		_, err := parser.Parse()
-		c.Assert(err, DeepEquals, e)
+		s.Equal(err, e)
 	}
 }
 
-func (s *ParserSuite) TestParseAtWithValidExpression(c *C) {
+func (s *ParserSuite) TestParseAtWithValidExpression() {
 	tim, _ := time.Parse("2006-01-02T15:04:05Z", "2016-12-16T21:42:47Z")
 
 	datas := map[string]Revisioner{
@@ -225,27 +233,27 @@ func (s *ParserSuite) TestParseAtWithValidExpression(c *C) {
 
 		result, err := parser.parseAt()
 
-		c.Assert(err, Equals, nil)
-		c.Assert(result, DeepEquals, expected)
+		s.NoError(err)
+		s.Equal(expected, result)
 	}
 }
 
-func (s *ParserSuite) TestParseAtWithUnValidExpression(c *C) {
+func (s *ParserSuite) TestParseAtWithInvalidExpression() {
 	datas := map[string]error{
 		"{test}": &ErrInvalidRevision{`wrong date "test" must fit ISO-8601 format : 2006-01-02T15:04:05Z`},
 		"{-1":    &ErrInvalidRevision{`missing "}" in @{-n} structure`},
 	}
 
-	for s, e := range datas {
-		parser := NewParser(bytes.NewBufferString(s))
+	for st, e := range datas {
+		parser := NewParser(bytes.NewBufferString(st))
 
 		_, err := parser.parseAt()
 
-		c.Assert(err, DeepEquals, e)
+		s.Equal(err, e)
 	}
 }
 
-func (s *ParserSuite) TestParseCaretWithValidExpression(c *C) {
+func (s *ParserSuite) TestParseCaretWithValidExpression() {
 	datas := map[string]Revisioner{
 		"":                    CaretPath{1},
 		"2":                   CaretPath{2},
@@ -265,12 +273,12 @@ func (s *ParserSuite) TestParseCaretWithValidExpression(c *C) {
 
 		result, err := parser.parseCaret()
 
-		c.Assert(err, Equals, nil)
-		c.Assert(result, DeepEquals, expected)
+		s.NoError(err)
+		s.Equal(expected, result)
 	}
 }
 
-func (s *ParserSuite) TestParseCaretWithUnValidExpression(c *C) {
+func (s *ParserSuite) TestParseCaretWithUnValidExpression() {
 	datas := map[string]error{
 		"3":         &ErrInvalidRevision{`"3" found must be 0, 1 or 2 after "^"`},
 		"{test}":    &ErrInvalidRevision{`"test" is not a valid revision suffix brace component`},
@@ -278,16 +286,16 @@ func (s *ParserSuite) TestParseCaretWithUnValidExpression(c *C) {
 		"{/test**}": &ErrInvalidRevision{"revision suffix brace component, error parsing regexp: invalid nested repetition operator: `**`"},
 	}
 
-	for s, e := range datas {
-		parser := NewParser(bytes.NewBufferString(s))
+	for st, e := range datas {
+		parser := NewParser(bytes.NewBufferString(st))
 
 		_, err := parser.parseCaret()
 
-		c.Assert(err, DeepEquals, e)
+		s.Equal(err, e)
 	}
 }
 
-func (s *ParserSuite) TestParseTildeWithValidExpression(c *C) {
+func (s *ParserSuite) TestParseTildeWithValidExpression() {
 	datas := map[string]Revisioner{
 		"3": TildePath{3},
 		"1": TildePath{1},
@@ -299,12 +307,12 @@ func (s *ParserSuite) TestParseTildeWithValidExpression(c *C) {
 
 		result, err := parser.parseTilde()
 
-		c.Assert(err, Equals, nil)
-		c.Assert(result, DeepEquals, expected)
+		s.NoError(err)
+		s.Equal(expected, result)
 	}
 }
 
-func (s *ParserSuite) TestParseColonWithValidExpression(c *C) {
+func (s *ParserSuite) TestParseColonWithValidExpression() {
 	datas := map[string]Revisioner{
 		"/hello world !":    ColonReg{regexp.MustCompile("hello world !"), false},
 		"/!-hello world !":  ColonReg{regexp.MustCompile("hello world !"), true},
@@ -323,27 +331,27 @@ func (s *ParserSuite) TestParseColonWithValidExpression(c *C) {
 
 		result, err := parser.parseColon()
 
-		c.Assert(err, Equals, nil)
-		c.Assert(result, DeepEquals, expected)
+		s.NoError(err)
+		s.Equal(expected, result)
 	}
 }
 
-func (s *ParserSuite) TestParseColonWithUnValidExpression(c *C) {
+func (s *ParserSuite) TestParseColonWithUnValidExpression() {
 	datas := map[string]error{
 		"/!test": &ErrInvalidRevision{`revision suffix brace component sequences starting with "/!" others than those defined are reserved`},
 		"/*":     &ErrInvalidRevision{"revision suffix brace component, error parsing regexp: missing argument to repetition operator: `*`"},
 	}
 
-	for s, e := range datas {
-		parser := NewParser(bytes.NewBufferString(s))
+	for st, e := range datas {
+		parser := NewParser(bytes.NewBufferString(st))
 
 		_, err := parser.parseColon()
 
-		c.Assert(err, DeepEquals, e)
+		s.Equal(err, e)
 	}
 }
 
-func (s *ParserSuite) TestParseRefWithValidName(c *C) {
+func (s *ParserSuite) TestParseRefWithValidName() {
 	datas := []string{
 		"lock",
 		"master",
@@ -362,12 +370,12 @@ func (s *ParserSuite) TestParseRefWithValidName(c *C) {
 
 		result, err := parser.parseRef()
 
-		c.Assert(err, Equals, nil)
-		c.Assert(result, Equals, Ref(d))
+		s.NoError(err)
+		s.Equal(Ref(d), result)
 	}
 }
 
-func (s *ParserSuite) TestParseRefWithInvalidName(c *C) {
+func (s *ParserSuite) TestParseRefWithInvalidName() {
 	datas := map[string]error{
 		".master":                     &ErrInvalidRevision{`must not start with "."`},
 		"/master":                     &ErrInvalidRevision{`must not start with "/"`},
@@ -386,11 +394,27 @@ func (s *ParserSuite) TestParseRefWithInvalidName(c *C) {
 		"test.lock":                   &ErrInvalidRevision{`cannot end with .lock`},
 	}
 
-	for s, e := range datas {
-		parser := NewParser(bytes.NewBufferString(s))
+	for st, e := range datas {
+		parser := NewParser(bytes.NewBufferString(st))
 
 		_, err := parser.parseRef()
 
-		c.Assert(err, DeepEquals, e)
+		s.Equal(err, e)
 	}
+}
+
+func FuzzParser(f *testing.F) {
+	f.Add("@{2016-12-16T21:42:47Z}")
+	f.Add("@~3")
+	f.Add("v0.99.8^{}")
+	f.Add("master:./README")
+	f.Add("HEAD^{/fix nasty bug}")
+	f.Add("HEAD^{/[A-")
+	f.Add(":/fix nasty bug")
+	f.Add(":/[A-")
+
+	f.Fuzz(func(t *testing.T, input string) {
+		parser := NewParser(bytes.NewBufferString(input))
+		parser.Parse()
+	})
 }

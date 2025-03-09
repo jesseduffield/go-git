@@ -16,9 +16,13 @@ var (
 
 // ReferenceUpdateRequest values represent reference upload requests.
 // Values from this type are not zero-value safe, use the New function instead.
+// TODO: remove the Packfile and Progress fields to make this 1-1 with the
+// wire protocol.
+// See https://git-scm.com/docs/pack-protocol#_reference_update_request_and_packfile_transfer
 type ReferenceUpdateRequest struct {
 	Capabilities *capability.List
 	Commands     []*Command
+	Options      []*Option
 	Shallow      *plumbing.Hash
 	// Packfile contains an optional packfile reader.
 	Packfile io.ReadCloser
@@ -47,6 +51,7 @@ func NewReferenceUpdateRequest() *ReferenceUpdateRequest {
 //   - ofs-delta
 //   - ref-delta
 //   - delete-refs
+//
 // It leaves up to the user to add the following capabilities later:
 //   - atomic
 //   - ofs-delta
@@ -58,7 +63,7 @@ func NewReferenceUpdateRequestFromCapabilities(adv *capability.List) *ReferenceU
 	r := NewReferenceUpdateRequest()
 
 	if adv.Supports(capability.Agent) {
-		r.Capabilities.Set(capability.Agent, capability.DefaultAgent)
+		r.Capabilities.Set(capability.Agent, capability.DefaultAgent())
 	}
 
 	if adv.Supports(capability.ReportStatus) {
@@ -86,9 +91,9 @@ type Action string
 
 const (
 	Create  Action = "create"
-	Update         = "update"
-	Delete         = "delete"
-	Invalid        = "invalid"
+	Update  Action = "update"
+	Delete  Action = "delete"
+	Invalid Action = "invalid"
 )
 
 type Command struct {
@@ -119,4 +124,9 @@ func (c *Command) validate() error {
 	}
 
 	return nil
+}
+
+type Option struct {
+	Key   string
+	Value string
 }

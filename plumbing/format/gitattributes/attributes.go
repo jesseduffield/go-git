@@ -1,9 +1,9 @@
 package gitattributes
 
 import (
+	"bufio"
 	"errors"
 	"io"
-	"io/ioutil"
 	"strings"
 )
 
@@ -15,7 +15,7 @@ const (
 
 var (
 	ErrMacroNotAllowed      = errors.New("macro not allowed")
-	ErrInvalidAttributeName = errors.New("Invalid attribute name")
+	ErrInvalidAttributeName = errors.New("invalid attribute name")
 )
 
 type MatchAttribute struct {
@@ -89,13 +89,10 @@ func (a attribute) String() string {
 
 // ReadAttributes reads patterns and attributes from the gitattributes format.
 func ReadAttributes(r io.Reader, domain []string, allowMacro bool) (attributes []MatchAttribute, err error) {
-	data, err := ioutil.ReadAll(r)
-	if err != nil {
-		return nil, err
-	}
+	scanner := bufio.NewScanner(r)
 
-	for _, line := range strings.Split(string(data), eol) {
-		attribute, err := ParseAttributesLine(line, domain, allowMacro)
+	for scanner.Scan() {
+		attribute, err := ParseAttributesLine(scanner.Text(), domain, allowMacro)
 		if err != nil {
 			return attributes, err
 		}
@@ -104,6 +101,10 @@ func ReadAttributes(r io.Reader, domain []string, allowMacro bool) (attributes [
 		}
 
 		attributes = append(attributes, attribute)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return attributes, err
 	}
 
 	return attributes, nil

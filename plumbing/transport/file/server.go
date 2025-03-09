@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/jesseduffield/go-git/v5/plumbing/server"
 	"github.com/jesseduffield/go-git/v5/plumbing/transport"
-	"github.com/jesseduffield/go-git/v5/plumbing/transport/internal/common"
-	"github.com/jesseduffield/go-git/v5/plumbing/transport/server"
 	"github.com/jesseduffield/go-git/v5/utils/ioutil"
 )
 
@@ -25,7 +24,7 @@ func ServeUploadPack(path string) error {
 		return fmt.Errorf("error creating session: %s", err)
 	}
 
-	return common.ServeUploadPack(srvCmd, s)
+	return server.ServeUploadPack(srvCmd, s)
 }
 
 // ServeReceivePack serves a git-receive-pack request using standard output,
@@ -43,10 +42,10 @@ func ServeReceivePack(path string) error {
 		return fmt.Errorf("error creating session: %s", err)
 	}
 
-	return common.ServeReceivePack(srvCmd, s)
+	return server.ServeReceivePack(srvCmd, s)
 }
 
-var srvCmd = common.ServerCommand{
+var srvCmd = server.ServerCommand{
 	Stdin:  os.Stdin,
 	Stdout: ioutil.WriteNopCloser(os.Stdout),
 	Stderr: os.Stderr,

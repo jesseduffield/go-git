@@ -1,71 +1,44 @@
-package filesystem
+package filesystem_test
 
 import (
-	"io/ioutil"
 	"testing"
 
 	"github.com/jesseduffield/go-git/v5/plumbing/cache"
 	"github.com/jesseduffield/go-git/v5/plumbing/storer"
-	"github.com/jesseduffield/go-git/v5/storage/test"
+	"github.com/jesseduffield/go-git/v5/storage/filesystem"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/go-git/go-billy/v5/memfs"
 	"github.com/go-git/go-billy/v5/osfs"
-	. "gopkg.in/check.v1"
 )
 
-func Test(t *testing.T) { TestingT(t) }
+var (
+	fs  = memfs.New()
+	sto = filesystem.NewStorage(fs, cache.NewObjectLRUDefault())
 
-type StorageSuite struct {
-	test.BaseStorageSuite
-	dir string
+	// Ensure interfaces are implemented.
+	_ storer.EncodedObjectStorer = sto
+	_ storer.IndexStorer         = sto
+	_ storer.ReferenceStorer     = sto
+	_ storer.ShallowStorer       = sto
+	_ storer.DeltaObjectStorer   = sto
+	_ storer.PackfileWriter      = sto
+)
+
+func TestFilesystem(t *testing.T) {
+	assert.Same(t, fs, sto.Filesystem())
 }
 
-var _ = Suite(&StorageSuite{})
+func TestNewStorageShouldNotAddAnyContentsToDir(t *testing.T) {
+	fs := osfs.New(t.TempDir())
 
-func (s *StorageSuite) SetUpTest(c *C) {
-	s.dir = c.MkDir()
-	storage := NewStorage(osfs.New(s.dir), cache.NewObjectLRUDefault())
-
-	setUpTest(s, c, storage)
-}
-
-func setUpTest(s *StorageSuite, c *C, storage *Storage) {
-	// ensure that right interfaces are implemented
-	var _ storer.EncodedObjectStorer = storage
-	var _ storer.IndexStorer = storage
-	var _ storer.ReferenceStorer = storage
-	var _ storer.ShallowStorer = storage
-	var _ storer.DeltaObjectStorer = storage
-	var _ storer.PackfileWriter = storage
-
-	s.BaseStorageSuite = test.NewBaseStorageSuite(storage)
-}
-
-func (s *StorageSuite) TestFilesystem(c *C) {
-	fs := memfs.New()
-	storage := NewStorage(fs, cache.NewObjectLRUDefault())
-
-	c.Assert(storage.Filesystem(), Equals, fs)
-}
-
-func (s *StorageSuite) TestNewStorageShouldNotAddAnyContentsToDir(c *C) {
-	fis, err := ioutil.ReadDir(s.dir)
-	c.Assert(err, IsNil)
-	c.Assert(fis, HasLen, 0)
-}
-
-type StorageExclusiveSuite struct {
-	StorageSuite
-}
-
-var _ = Suite(&StorageExclusiveSuite{})
-
-func (s *StorageExclusiveSuite) SetUpTest(c *C) {
-	s.dir = c.MkDir()
-	storage := NewStorageWithOptions(
-		osfs.New(s.dir),
+	sto := filesystem.NewStorageWithOptions(
+		fs,
 		cache.NewObjectLRUDefault(),
-		Options{ExclusiveAccess: true})
+		filesystem.Options{ExclusiveAccess: true})
+	assert.NotNil(t, sto)
 
-	setUpTest(&s.StorageSuite, c, storage)
+	fis, err := fs.ReadDir("/")
+	assert.NoError(t, err)
+	assert.Len(t, fis, 0)
 }

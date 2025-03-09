@@ -32,7 +32,7 @@ func newFile(name, contents string) (*file, error) {
 func (f *file) Hash() []byte {
 	if f.hash == nil {
 		h := fnv.New64a()
-		h.Write([]byte(f.contents)) // it nevers returns an error.
+		h.Write([]byte(f.contents)) // it never returns an error.
 		f.hash = h.Sum(nil)
 	}
 
@@ -53,6 +53,10 @@ func (f *file) Children() ([]noder.Noder, error) {
 
 func (f *file) NumChildren() (int, error) {
 	return 0, nil
+}
+
+func (f *file) Skip() bool {
+	return false
 }
 
 const (

@@ -6,31 +6,40 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/jesseduffield/go-git/v5/plumbing"
 	"github.com/jesseduffield/go-git/v5/plumbing/format/pktline"
 	"github.com/jesseduffield/go-git/v5/plumbing/protocol/packp"
 	"github.com/jesseduffield/go-git/v5/plumbing/transport"
-	"github.com/jesseduffield/go-git/v5/plumbing/transport/internal/common"
 	"github.com/jesseduffield/go-git/v5/utils/ioutil"
+	"github.com/jesseduffield/go-git/v5/utils/trace"
 )
 
 type upSession struct {
 	*session
 }
 
-func newUploadPackSession(c *http.Client, ep *transport.Endpoint, auth transport.AuthMethod) (transport.UploadPackSession, error) {
+func newUploadPackSession(c *client, ep *transport.Endpoint, auth transport.AuthMethod) (transport.UploadPackSession, error) {
 	s, err := newSession(c, ep, auth)
 	return &upSession{s}, err
 }
 
 func (s *upSession) AdvertisedReferences() (*packp.AdvRefs, error) {
-	return advertisedReferences(s.session, transport.UploadPackServiceName)
+	return advertisedReferences(context.TODO(), s.session, transport.UploadPackServiceName)
+}
+
+func (s *upSession) AdvertisedReferencesContext(ctx context.Context) (*packp.AdvRefs, error) {
+	return advertisedReferences(ctx, s.session, transport.UploadPackServiceName)
 }
 
 func (s *upSession) UploadPack(
 	ctx context.Context, req *packp.UploadPackRequest,
 ) (*packp.UploadPackResponse, error) {
+	start := time.Now()
+	defer func() {
+		trace.Performance.Printf("performance: %.9f s: upload_pack", time.Since(start).Seconds())
+	}()
 
 	if req.IsEmpty() {
 		return nil, transport.ErrEmptyUploadPackRequest
@@ -65,7 +74,7 @@ func (s *upSession) UploadPack(
 	}
 
 	rc := ioutil.NewReadCloser(r, res.Body)
-	return common.DecodeUploadPackResponse(rc, req)
+	return transport.DecodeUploadPackResponse(rc, req)
 }
 
 // Close does nothing.
@@ -76,7 +85,6 @@ func (s *upSession) Close() error {
 func (s *upSession) doRequest(
 	ctx context.Context, method, url string, content *bytes.Buffer,
 ) (*http.Response, error) {
-
 	var body io.Reader
 	if content != nil {
 		body = content
@@ -96,7 +104,6 @@ func (s *upSession) doRequest(
 	}
 
 	if err := NewErr(res); err != nil {
-		_ = res.Body.Close()
 		return nil, err
 	}
 
@@ -105,8 +112,6 @@ func (s *upSession) doRequest(
 
 func uploadPackRequestToReader(req *packp.UploadPackRequest) (*bytes.Buffer, error) {
 	buf := bytes.NewBuffer(nil)
-	e := pktline.NewEncoder(buf)
-
 	if err := req.UploadRequest.Encode(buf); err != nil {
 		return nil, fmt.Errorf("sending upload-req message: %s", err)
 	}
@@ -115,7 +120,7 @@ func uploadPackRequestToReader(req *packp.UploadPackRequest) (*bytes.Buffer, err
 		return nil, fmt.Errorf("sending haves message: %s", err)
 	}
 
-	if err := e.EncodeString("done\n"); err != nil {
+	if _, err := pktline.Writef(buf, "done\n"); err != nil {
 		return nil, err
 	}
 

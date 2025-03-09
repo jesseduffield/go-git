@@ -2,11 +2,10 @@ package examples
 
 import (
 	"flag"
-	"go/build"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -15,26 +14,47 @@ var examplesTest = flag.Bool("examples", false, "run the examples tests")
 var defaultURL = "https://github.com/git-fixtures/basic.git"
 
 var args = map[string][]string{
-	"branch":      {defaultURL, tempFolder()},
-	"checkout":    {defaultURL, tempFolder(), "35e85108805c84807bc66a02d91535e1e24b38b9"},
-	"clone":       {defaultURL, tempFolder()},
-	"context":     {defaultURL, tempFolder()},
-	"commit":      {cloneRepository(defaultURL, tempFolder())},
-	"custom_http": {defaultURL},
-	"open":        {cloneRepository(defaultURL, tempFolder())},
-	"progress":    {defaultURL, tempFolder()},
-	"push":        {setEmptyRemote(cloneRepository(defaultURL, tempFolder()))},
-	"revision":    {cloneRepository(defaultURL, tempFolder()), "master~2^"},
-	"showcase":    {defaultURL, tempFolder()},
-	"tag":         {cloneRepository(defaultURL, tempFolder())},
-	"pull":        {createRepositoryWithRemote(tempFolder(), defaultURL)},
-	"ls":          {cloneRepository(defaultURL, tempFolder()), "HEAD", "vendor"},
-	"merge_base":  {cloneRepository(defaultURL, tempFolder()), "--is-ancestor", "HEAD~3", "HEAD^"},
+	"blame":                      {defaultURL, "CHANGELOG"},
+	"branch":                     {defaultURL, tempFolder()},
+	"checkout":                   {defaultURL, tempFolder(), "35e85108805c84807bc66a02d91535e1e24b38b9"},
+	"checkout-branch":            {defaultURL, tempFolder(), "branch"},
+	"clone":                      {defaultURL, tempFolder()},
+	"config":                     {},
+	"commit":                     {cloneRepository(defaultURL, tempFolder())},
+	"context":                    {defaultURL, tempFolder()},
+	"custom_http":                {defaultURL},
+	"find-if-any-tag-point-head": {cloneRepository(defaultURL, tempFolder())},
+	"ls":                         {cloneRepository(defaultURL, tempFolder()), "HEAD", "vendor"},
+	"ls-remote":                  {defaultURL},
+	"memory":                     {defaultURL},
+	"merge_base":                 {cloneRepository(defaultURL, tempFolder()), "--is-ancestor", "HEAD~3", "HEAD^"},
+	"open":                       {cloneRepository(defaultURL, tempFolder())},
+	"perf-clone":                 {cloneRepository(defaultURL, tempFolder())},
+	"progress":                   {defaultURL, tempFolder()},
+	"pull":                       {createRepositoryWithRemote(tempFolder(), defaultURL)},
+	"push":                       {setEmptyRemote(cloneRepository(defaultURL, tempFolder()))},
+	"restore":                    {cloneRepository(defaultURL, tempFolder())},
+	"revision":                   {cloneRepository(defaultURL, tempFolder()), "master~2^"},
+	"sha256":                     {tempFolder()},
+	"showcase":                   {defaultURL, tempFolder()},
+	"sparse-checkout":            {defaultURL, "vendor", tempFolder()},
+	"tag":                        {cloneRepository(defaultURL, tempFolder())},
 }
 
-var ignored = map[string]bool{}
+// tests not working / set-up
+var ignored = map[string]bool{
+	"ls":              true,
+	"sha256":          true,
+	"submodule":       true,
+	"tag-create-push": true,
+}
 
-var tempFolders = []string{}
+var (
+	tempFolders = []string{}
+
+	_, callingFile, _, _ = runtime.Caller(0)
+	basepath             = filepath.Dir(callingFile)
+)
 
 func TestExamples(t *testing.T) {
 	flag.Parse()
@@ -45,13 +65,13 @@ func TestExamples(t *testing.T) {
 
 	defer deleteTempFolders()
 
-	examples, err := filepath.Glob(examplesFolder())
+	exampleMains, err := filepath.Glob(filepath.Join(basepath, "*", "main.go"))
 	if err != nil {
 		t.Errorf("error finding tests: %s", err)
 	}
 
-	for _, example := range examples {
-		dir := filepath.Dir(example)
+	for _, main := range exampleMains {
+		dir := filepath.Dir(main)
 		_, name := filepath.Split(dir)
 
 		if ignored[name] {
@@ -65,25 +85,11 @@ func TestExamples(t *testing.T) {
 }
 
 func tempFolder() string {
-	path, err := ioutil.TempDir("", "")
+	path, err := os.MkdirTemp("", "")
 	CheckIfError(err)
 
 	tempFolders = append(tempFolders, path)
 	return path
-}
-
-func packageFolder() string {
-	return filepath.Join(
-		build.Default.GOPATH,
-		"src", "github.com/jesseduffield/go-git/v5",
-	)
-}
-
-func examplesFolder() string {
-	return filepath.Join(
-		packageFolder(),
-		"_examples", "*", "main.go",
-	)
 }
 
 func cloneRepository(url, folder string) string {

@@ -1,28 +1,37 @@
 package commitgraph
 
 import (
-	"crypto/sha1"
-	"hash"
+	"crypto"
 	"io"
 
 	"github.com/jesseduffield/go-git/v5/plumbing"
+	"github.com/jesseduffield/go-git/v5/plumbing/hash"
 	"github.com/jesseduffield/go-git/v5/utils/binary"
 )
 
 // Encoder writes MemoryIndex structs to an output stream.
+//
+// Deprecated: This package uses the wrong types for Generation and Index in CommitData.
+// Use the v2 package instead.
 type Encoder struct {
 	io.Writer
 	hash hash.Hash
 }
 
 // NewEncoder returns a new stream encoder that writes to w.
+//
+// Deprecated: This package uses the wrong types for Generation and Index in CommitData.
+// Use the v2 package instead.
 func NewEncoder(w io.Writer) *Encoder {
-	h := sha1.New()
+	h := hash.New(hash.CryptoType)
 	mw := io.MultiWriter(w, h)
 	return &Encoder{mw, h}
 }
 
 // Encode writes an index into the commit-graph file
+//
+// Deprecated: This package uses the wrong types for Generation and Index in CommitData.
+// Use the v2 package instead.
 func (e *Encoder) Encode(idx Index) error {
 	// Get all the hashes in the input index
 	hashes := idx.Hashes()
@@ -31,7 +40,7 @@ func (e *Encoder) Encode(idx Index) error {
 	hashToIndex, fanout, extraEdgesCount := e.prepare(idx, hashes)
 
 	chunkSignatures := [][]byte{oidFanoutSignature, oidLookupSignature, commitDataSignature}
-	chunkSizes := []uint64{4 * 256, uint64(len(hashes)) * 20, uint64(len(hashes)) * 36}
+	chunkSizes := []uint64{4 * 256, uint64(len(hashes)) * hash.Size, uint64(len(hashes)) * (hash.Size + commitDataSize)}
 	if extraEdgesCount > 0 {
 		chunkSignatures = append(chunkSignatures, extraEdgeListSignature)
 		chunkSizes = append(chunkSizes, uint64(extraEdgesCount)*4)
@@ -89,7 +98,11 @@ func (e *Encoder) prepare(idx Index, hashes []plumbing.Hash) (hashToIndex map[pl
 
 func (e *Encoder) encodeFileHeader(chunkCount int) (err error) {
 	if _, err = e.Write(commitFileSignature); err == nil {
-		_, err = e.Write([]byte{1, 1, byte(chunkCount), 0})
+		version := byte(1)
+		if hash.CryptoType == crypto.SHA256 {
+			version = byte(2)
+		}
+		_, err = e.Write([]byte{1, version, byte(chunkCount), 0})
 	}
 	return
 }
@@ -183,6 +196,6 @@ func (e *Encoder) encodeExtraEdges(extraEdges []uint32) (err error) {
 }
 
 func (e *Encoder) encodeChecksum() error {
-	_, err := e.Write(e.hash.Sum(nil)[:20])
+	_, err := e.Write(e.hash.Sum(nil)[:hash.Size])
 	return err
 }

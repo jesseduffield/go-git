@@ -15,14 +15,27 @@ import (
 type UploadPackRequest struct {
 	UploadRequest
 	UploadHaves
+	UploadPackCommands chan UploadPackCommand
+}
+
+type UploadPackCommand struct {
+	Acks []UploadPackRequestAck
+	Done bool
+}
+
+type UploadPackRequestAck struct {
+	Hash     plumbing.Hash
+	IsCommon bool
+	IsReady  bool
 }
 
 // NewUploadPackRequest creates a new UploadPackRequest and returns a pointer.
 func NewUploadPackRequest() *UploadPackRequest {
 	ur := NewUploadRequest()
 	return &UploadPackRequest{
-		UploadHaves:   UploadHaves{},
-		UploadRequest: *ur,
+		UploadHaves:        UploadHaves{},
+		UploadRequest:      *ur,
+		UploadPackCommands: make(chan UploadPackCommand, 1),
 	}
 }
 
@@ -33,15 +46,16 @@ func NewUploadPackRequest() *UploadPackRequest {
 func NewUploadPackRequestFromCapabilities(adv *capability.List) *UploadPackRequest {
 	ur := NewUploadRequestFromCapabilities(adv)
 	return &UploadPackRequest{
-		UploadHaves:   UploadHaves{},
-		UploadRequest: *ur,
+		UploadHaves:        UploadHaves{},
+		UploadRequest:      *ur,
+		UploadPackCommands: make(chan UploadPackCommand, 1),
 	}
 }
 
-// IsEmpty a request if empty if Haves are contained in the Wants, or if Wants
-// length is zero
+// IsEmpty returns whether a request is empty - it is empty if Haves are contained
+// in the Wants, or if Wants length is zero, and we don't have any shallows
 func (r *UploadPackRequest) IsEmpty() bool {
-	return isSubset(r.Wants, r.Haves)
+	return isSubset(r.Wants, r.Haves) && len(r.Shallows) == 0
 }
 
 func isSubset(needle []plumbing.Hash, haystack []plumbing.Hash) bool {
@@ -71,8 +85,6 @@ type UploadHaves struct {
 // Encode encodes the UploadHaves into the Writer. If flush is true, a flush
 // command will be encoded at the end of the writer content.
 func (u *UploadHaves) Encode(w io.Writer, flush bool) error {
-	e := pktline.NewEncoder(w)
-
 	plumbing.HashesSort(u.Haves)
 
 	var last plumbing.Hash
@@ -81,7 +93,7 @@ func (u *UploadHaves) Encode(w io.Writer, flush bool) error {
 			continue
 		}
 
-		if err := e.Encodef("have %s\n", have); err != nil {
+		if _, err := pktline.Writef(w, "have %s\n", have); err != nil {
 			return fmt.Errorf("sending haves for %q: %s", have, err)
 		}
 
@@ -89,7 +101,7 @@ func (u *UploadHaves) Encode(w io.Writer, flush bool) error {
 	}
 
 	if flush && len(u.Haves) != 0 {
-		if err := e.Flush(); err != nil {
+		if err := pktline.WriteFlush(w); err != nil {
 			return fmt.Errorf("sending flush-pkt after haves: %s", err)
 		}
 	}

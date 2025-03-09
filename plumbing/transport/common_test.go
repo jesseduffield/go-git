@@ -2,187 +2,166 @@ package transport
 
 import (
 	"fmt"
-	"net/url"
 	"testing"
 
-	"github.com/jesseduffield/go-git/v5/plumbing/protocol/packp/capability"
-
-	. "gopkg.in/check.v1"
+	"github.com/stretchr/testify/suite"
 )
 
-func Test(t *testing.T) { TestingT(t) }
-
-type SuiteCommon struct{}
-
-var _ = Suite(&SuiteCommon{})
-
-func (s *SuiteCommon) TestNewEndpointHTTP(c *C) {
-	e, err := NewEndpoint("http://git:pass@github.com/user/repository.git?foo#bar")
-	c.Assert(err, IsNil)
-	c.Assert(e.Protocol, Equals, "http")
-	c.Assert(e.User, Equals, "git")
-	c.Assert(e.Password, Equals, "pass")
-	c.Assert(e.Host, Equals, "github.com")
-	c.Assert(e.Port, Equals, 0)
-	c.Assert(e.Path, Equals, "/user/repository.git?foo#bar")
-	c.Assert(e.String(), Equals, "http://git:pass@github.com/user/repository.git?foo#bar")
+func TestCommonSuite(t *testing.T) {
+	suite.Run(t, new(CommonSuite))
 }
 
-func (s *SuiteCommon) TestNewEndpointPorts(c *C) {
-	e, err := NewEndpoint("http://git:pass@github.com:8080/user/repository.git?foo#bar")
-	c.Assert(err, IsNil)
-	c.Assert(e.String(), Equals, "http://git:pass@github.com:8080/user/repository.git?foo#bar")
-
-	e, err = NewEndpoint("https://git:pass@github.com:443/user/repository.git?foo#bar")
-	c.Assert(err, IsNil)
-	c.Assert(e.String(), Equals, "https://git:pass@github.com/user/repository.git?foo#bar")
-
-	e, err = NewEndpoint("ssh://git:pass@github.com:22/user/repository.git?foo#bar")
-	c.Assert(err, IsNil)
-	c.Assert(e.String(), Equals, "ssh://git:pass@github.com/user/repository.git?foo#bar")
-
-	e, err = NewEndpoint("git://github.com:9418/user/repository.git?foo#bar")
-	c.Assert(err, IsNil)
-	c.Assert(e.String(), Equals, "git://github.com/user/repository.git?foo#bar")
-
+type CommonSuite struct {
+	suite.Suite
 }
 
-func (s *SuiteCommon) TestNewEndpointSSH(c *C) {
-	e, err := NewEndpoint("ssh://git@github.com/user/repository.git")
-	c.Assert(err, IsNil)
-	c.Assert(e.Protocol, Equals, "ssh")
-	c.Assert(e.User, Equals, "git")
-	c.Assert(e.Password, Equals, "")
-	c.Assert(e.Host, Equals, "github.com")
-	c.Assert(e.Port, Equals, 0)
-	c.Assert(e.Path, Equals, "/user/repository.git")
-	c.Assert(e.String(), Equals, "ssh://git@github.com/user/repository.git")
+func (s *CommonSuite) TestIsRepoNotFoundErrorForUnknownSource() {
+	msg := "unknown system is complaining of something very sad :("
+
+	isRepoNotFound := isRepoNotFoundError(msg)
+
+	s.False(isRepoNotFound)
 }
 
-func (s *SuiteCommon) TestNewEndpointSSHNoUser(c *C) {
-	e, err := NewEndpoint("ssh://github.com/user/repository.git")
-	c.Assert(err, IsNil)
-	c.Assert(e.Protocol, Equals, "ssh")
-	c.Assert(e.User, Equals, "")
-	c.Assert(e.Password, Equals, "")
-	c.Assert(e.Host, Equals, "github.com")
-	c.Assert(e.Port, Equals, 0)
-	c.Assert(e.Path, Equals, "/user/repository.git")
-	c.Assert(e.String(), Equals, "ssh://github.com/user/repository.git")
+func (s *CommonSuite) TestIsRepoNotFoundError() {
+	msg := "no such repository : some error stuf"
+
+	isRepoNotFound := isRepoNotFoundError(msg)
+
+	s.True(isRepoNotFound)
 }
 
-func (s *SuiteCommon) TestNewEndpointSSHWithPort(c *C) {
-	e, err := NewEndpoint("ssh://git@github.com:777/user/repository.git")
-	c.Assert(err, IsNil)
-	c.Assert(e.Protocol, Equals, "ssh")
-	c.Assert(e.User, Equals, "git")
-	c.Assert(e.Password, Equals, "")
-	c.Assert(e.Host, Equals, "github.com")
-	c.Assert(e.Port, Equals, 777)
-	c.Assert(e.Path, Equals, "/user/repository.git")
-	c.Assert(e.String(), Equals, "ssh://git@github.com:777/user/repository.git")
+func (s *CommonSuite) TestIsRepoNotFoundErrorForGithub() {
+	msg := fmt.Sprintf("%s : some error stuf", githubRepoNotFoundErr)
+
+	isRepoNotFound := isRepoNotFoundError(msg)
+
+	s.True(isRepoNotFound)
 }
 
-func (s *SuiteCommon) TestNewEndpointSCPLike(c *C) {
-	e, err := NewEndpoint("git@github.com:user/repository.git")
-	c.Assert(err, IsNil)
-	c.Assert(e.Protocol, Equals, "ssh")
-	c.Assert(e.User, Equals, "git")
-	c.Assert(e.Password, Equals, "")
-	c.Assert(e.Host, Equals, "github.com")
-	c.Assert(e.Port, Equals, 22)
-	c.Assert(e.Path, Equals, "user/repository.git")
-	c.Assert(e.String(), Equals, "ssh://git@github.com/user/repository.git")
+func (s *CommonSuite) TestIsRepoNotFoundErrorForBitBucket() {
+	msg := fmt.Sprintf("%s : some error stuf", bitbucketRepoNotFoundErr)
+
+	isRepoNotFound := isRepoNotFoundError(msg)
+
+	s.True(isRepoNotFound)
 }
 
-func (s *SuiteCommon) TestNewEndpointSCPLikeWithPort(c *C) {
-	e, err := NewEndpoint("git@github.com:9999/user/repository.git")
-	c.Assert(err, IsNil)
-	c.Assert(e.Protocol, Equals, "ssh")
-	c.Assert(e.User, Equals, "git")
-	c.Assert(e.Password, Equals, "")
-	c.Assert(e.Host, Equals, "github.com")
-	c.Assert(e.Port, Equals, 9999)
-	c.Assert(e.Path, Equals, "user/repository.git")
-	c.Assert(e.String(), Equals, "ssh://git@github.com:9999/user/repository.git")
+func (s *CommonSuite) TestIsRepoNotFoundErrorForLocal() {
+	msg := fmt.Sprintf("some error stuf : %s", localRepoNotFoundErr)
+
+	isRepoNotFound := isRepoNotFoundError(msg)
+
+	s.True(isRepoNotFound)
 }
 
-func (s *SuiteCommon) TestNewEndpointFileAbs(c *C) {
-	e, err := NewEndpoint("/foo.git")
-	c.Assert(err, IsNil)
-	c.Assert(e.Protocol, Equals, "file")
-	c.Assert(e.User, Equals, "")
-	c.Assert(e.Password, Equals, "")
-	c.Assert(e.Host, Equals, "")
-	c.Assert(e.Port, Equals, 0)
-	c.Assert(e.Path, Equals, "/foo.git")
-	c.Assert(e.String(), Equals, "file:///foo.git")
+func (s *CommonSuite) TestIsRepoNotFoundErrorForGitProtocolNotFound() {
+	msg := fmt.Sprintf("%s : some error stuf", gitProtocolNotFoundErr)
+
+	isRepoNotFound := isRepoNotFoundError(msg)
+
+	s.True(isRepoNotFound)
 }
 
-func (s *SuiteCommon) TestNewEndpointFileRel(c *C) {
-	e, err := NewEndpoint("foo.git")
-	c.Assert(err, IsNil)
-	c.Assert(e.Protocol, Equals, "file")
-	c.Assert(e.User, Equals, "")
-	c.Assert(e.Password, Equals, "")
-	c.Assert(e.Host, Equals, "")
-	c.Assert(e.Port, Equals, 0)
-	c.Assert(e.Path, Equals, "foo.git")
-	c.Assert(e.String(), Equals, "file://foo.git")
+func (s *CommonSuite) TestIsRepoNotFoundErrorForGitProtocolNoSuch() {
+	msg := fmt.Sprintf("%s : some error stuf", gitProtocolNoSuchErr)
+
+	isRepoNotFound := isRepoNotFoundError(msg)
+
+	s.True(isRepoNotFound)
 }
 
-func (s *SuiteCommon) TestNewEndpointFileWindows(c *C) {
-	e, err := NewEndpoint("C:\\foo.git")
-	c.Assert(err, IsNil)
-	c.Assert(e.Protocol, Equals, "file")
-	c.Assert(e.User, Equals, "")
-	c.Assert(e.Password, Equals, "")
-	c.Assert(e.Host, Equals, "")
-	c.Assert(e.Port, Equals, 0)
-	c.Assert(e.Path, Equals, "C:\\foo.git")
-	c.Assert(e.String(), Equals, "file://C:\\foo.git")
+func (s *CommonSuite) TestIsRepoNotFoundErrorForGitProtocolAccessDenied() {
+	msg := fmt.Sprintf("%s : some error stuf", gitProtocolAccessDeniedErr)
+
+	isRepoNotFound := isRepoNotFoundError(msg)
+
+	s.True(isRepoNotFound)
 }
 
-func (s *SuiteCommon) TestNewEndpointFileURL(c *C) {
-	e, err := NewEndpoint("file:///foo.git")
-	c.Assert(err, IsNil)
-	c.Assert(e.Protocol, Equals, "file")
-	c.Assert(e.User, Equals, "")
-	c.Assert(e.Password, Equals, "")
-	c.Assert(e.Host, Equals, "")
-	c.Assert(e.Port, Equals, 0)
-	c.Assert(e.Path, Equals, "/foo.git")
-	c.Assert(e.String(), Equals, "file:///foo.git")
+func (s *CommonSuite) TestIsRepoNotFoundErrorForGogsAccessDenied() {
+	msg := fmt.Sprintf("%s : some error stuf", gogsAccessDeniedErr)
+
+	isRepoNotFound := isRepoNotFoundError(msg)
+
+	s.True(isRepoNotFound)
 }
 
-func (s *SuiteCommon) TestValidEndpoint(c *C) {
-	user := "person@mail.com"
-	pass := " !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
-	e, err := NewEndpoint(fmt.Sprintf(
-		"http://%s:%s@github.com/user/repository.git",
-		url.PathEscape(user),
-		url.PathEscape(pass),
-	))
-	c.Assert(err, IsNil)
-	c.Assert(e, NotNil)
-	c.Assert(e.User, Equals, user)
-	c.Assert(e.Password, Equals, pass)
-	c.Assert(e.Host, Equals, "github.com")
-	c.Assert(e.Path, Equals, "/user/repository.git")
+func (s *CommonSuite) TestIsRepoNotFoundErrorForGitlab() {
+	msg := fmt.Sprintf("%s : some error stuf", gitlabRepoNotFoundErr)
 
-	c.Assert(e.String(), Equals, "http://person@mail.com:%20%21%22%23$%25&%27%28%29%2A+%2C-.%2F:%3B%3C=%3E%3F@%5B%5C%5D%5E_%60%7B%7C%7D~@github.com/user/repository.git")
+	isRepoNotFound := isRepoNotFoundError(msg)
+
+	s.True(isRepoNotFound)
 }
 
-func (s *SuiteCommon) TestNewEndpointInvalidURL(c *C) {
-	e, err := NewEndpoint("http://\\")
-	c.Assert(err, NotNil)
-	c.Assert(e, IsNil)
+func (s *CommonSuite) TestCheckNotFoundError() {
+	firstErrLine := make(chan string, 1)
+
+	session := session{
+		firstErrLine: firstErrLine,
+	}
+
+	firstErrLine <- ""
+
+	err := session.checkNotFoundError()
+
+	s.Nil(err)
 }
 
-func (s *SuiteCommon) TestFilterUnsupportedCapabilities(c *C) {
-	l := capability.NewList()
-	l.Set(capability.MultiACK)
+func (s *CommonSuite) TestAdvertisedReferencesWithRemoteUnknownError() {
+	var (
+		stderr  = "something"
+		wantErr = fmt.Errorf("unknown error: something")
+	)
 
-	FilterUnsupportedCapabilities(l)
-	c.Assert(l.Supports(capability.MultiACK), Equals, false)
+	client := NewClient(mockCommander{stderr: stderr})
+	sess, err := client.NewUploadPackSession(nil, nil)
+	if err != nil {
+		s.T().Fatalf("unexpected error: %s", err)
+	}
+
+	_, err = sess.AdvertisedReferences()
+
+	if wantErr != nil {
+		if wantErr != err {
+			if wantErr.Error() != err.Error() {
+				s.T().Fatalf("expected a different error: got '%s', expected '%s'", err, wantErr)
+			}
+		}
+	} else if err != nil {
+		s.T().Fatalf("unexpected error: %s", err)
+	}
+}
+
+func (s *CommonSuite) TestAdvertisedReferencesWithRemoteNotFoundError() {
+	var (
+		stderr = `remote:
+remote: ========================================================================
+remote: 
+remote: ERROR: The project you were looking for could not be found or you don't have permission to view it.
+
+remote: 
+remote: ========================================================================
+remote:`
+		wantErr = ErrRepositoryNotFound
+	)
+
+	client := NewClient(mockCommander{stderr: stderr})
+	sess, err := client.NewUploadPackSession(nil, nil)
+	if err != nil {
+		s.T().Fatalf("unexpected error: %s", err)
+	}
+
+	_, err = sess.AdvertisedReferences()
+
+	if wantErr != nil {
+		if wantErr != err {
+			if wantErr.Error() != err.Error() {
+				s.T().Fatalf("expected a different error: got '%s', expected '%s'", err, wantErr)
+			}
+		}
+	} else if err != nil {
+		s.T().Fatalf("unexpected error: %s", err)
+	}
 }

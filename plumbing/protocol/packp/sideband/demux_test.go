@@ -4,92 +4,88 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"io/ioutil"
 	"testing"
 
 	"github.com/jesseduffield/go-git/v5/plumbing/format/pktline"
-
-	. "gopkg.in/check.v1"
+	"github.com/stretchr/testify/suite"
 )
 
-func Test(t *testing.T) { TestingT(t) }
+type SidebandSuite struct {
+	suite.Suite
+}
 
-type SidebandSuite struct{}
+func TestSidebandSuite(t *testing.T) {
+	suite.Run(t, new(SidebandSuite))
+}
 
-var _ = Suite(&SidebandSuite{})
-
-func (s *SidebandSuite) TestDecode(c *C) {
+func (s *SidebandSuite) TestDecode() {
 	expected := []byte("abcdefghijklmnopqrstuvwxyz")
 
 	buf := bytes.NewBuffer(nil)
-	e := pktline.NewEncoder(buf)
-	e.Encode(PackData.WithPayload(expected[0:8]))
-	e.Encode(ProgressMessage.WithPayload([]byte{'F', 'O', 'O', '\n'}))
-	e.Encode(PackData.WithPayload(expected[8:16]))
-	e.Encode(PackData.WithPayload(expected[16:26]))
+	pktline.Write(buf, PackData.WithPayload(expected[0:8]))
+	pktline.Write(buf, ProgressMessage.WithPayload([]byte{'F', 'O', 'O', '\n'}))
+	pktline.Write(buf, PackData.WithPayload(expected[8:16]))
+	pktline.Write(buf, PackData.WithPayload(expected[16:26]))
 
 	content := make([]byte, 26)
 	d := NewDemuxer(Sideband64k, buf)
 	n, err := io.ReadFull(d, content)
-	c.Assert(err, IsNil)
-	c.Assert(n, Equals, 26)
-	c.Assert(content, DeepEquals, expected)
+	s.NoError(err)
+	s.Equal(26, n)
+	s.Equal(expected, content)
 }
 
-func (s *SidebandSuite) TestDecodeMoreThanContain(c *C) {
+func (s *SidebandSuite) TestDecodeMoreThanContain() {
 	expected := []byte("abcdefghijklmnopqrstuvwxyz")
 
 	buf := bytes.NewBuffer(nil)
-	e := pktline.NewEncoder(buf)
-	e.Encode(PackData.WithPayload(expected))
+	pktline.Write(buf, PackData.WithPayload(expected))
 
 	content := make([]byte, 42)
 	d := NewDemuxer(Sideband64k, buf)
 	n, err := io.ReadFull(d, content)
-	c.Assert(err, Equals, io.ErrUnexpectedEOF)
-	c.Assert(n, Equals, 26)
-	c.Assert(content[0:26], DeepEquals, expected)
+	s.ErrorIs(err, io.ErrUnexpectedEOF)
+	s.Equal(26, n)
+	s.Equal(expected, content[0:26])
 }
 
-func (s *SidebandSuite) TestDecodeWithError(c *C) {
+func (s *SidebandSuite) TestDecodeWithError() {
 	expected := []byte("abcdefghijklmnopqrstuvwxyz")
 
 	buf := bytes.NewBuffer(nil)
-	e := pktline.NewEncoder(buf)
-	e.Encode(PackData.WithPayload(expected[0:8]))
-	e.Encode(ErrorMessage.WithPayload([]byte{'F', 'O', 'O', '\n'}))
-	e.Encode(PackData.WithPayload(expected[8:16]))
-	e.Encode(PackData.WithPayload(expected[16:26]))
+	pktline.Write(buf, PackData.WithPayload(expected[0:8]))
+	pktline.Write(buf, ErrorMessage.WithPayload([]byte{'F', 'O', 'O', '\n'}))
+	pktline.Write(buf, PackData.WithPayload(expected[8:16]))
+	pktline.Write(buf, PackData.WithPayload(expected[16:26]))
 
 	content := make([]byte, 26)
 	d := NewDemuxer(Sideband64k, buf)
 	n, err := io.ReadFull(d, content)
-	c.Assert(err, ErrorMatches, "unexpected error: FOO\n")
-	c.Assert(n, Equals, 8)
-	c.Assert(content[0:8], DeepEquals, expected[0:8])
+	s.ErrorContains(err, "unexpected error: FOO\n")
+	s.Equal(8, n)
+	s.Equal(expected[0:8], content[0:8])
 }
 
 type mockReader struct{}
 
 func (r *mockReader) Read([]byte) (int, error) { return 0, errors.New("foo") }
 
-func (s *SidebandSuite) TestDecodeFromFailingReader(c *C) {
+func (s *SidebandSuite) TestDecodeFromFailingReader() {
 	content := make([]byte, 26)
 	d := NewDemuxer(Sideband64k, &mockReader{})
 	n, err := io.ReadFull(d, content)
-	c.Assert(err, ErrorMatches, "foo")
-	c.Assert(n, Equals, 0)
+	s.ErrorContains(err, "foo")
+	s.Equal(0, n)
 }
 
-func (s *SidebandSuite) TestDecodeWithProgress(c *C) {
+func (s *SidebandSuite) TestDecodeWithProgress() {
 	expected := []byte("abcdefghijklmnopqrstuvwxyz")
 
 	input := bytes.NewBuffer(nil)
-	e := pktline.NewEncoder(input)
-	e.Encode(PackData.WithPayload(expected[0:8]))
-	e.Encode(ProgressMessage.WithPayload([]byte{'F', 'O', 'O', '\n'}))
-	e.Encode(PackData.WithPayload(expected[8:16]))
-	e.Encode(PackData.WithPayload(expected[16:26]))
+	pktline.Write(input, PackData.WithPayload(expected[0:8]))
+	pktline.Write(input, ProgressMessage.WithPayload([]byte{'F', 'O', 'O', '\n'}))
+	pktline.Write(input, PackData.WithPayload(expected[8:16]))
+	pktline.Write(input, PackData.WithPayload(expected[16:26]))
 
 	output := bytes.NewBuffer(nil)
 	content := make([]byte, 26)
@@ -97,59 +93,80 @@ func (s *SidebandSuite) TestDecodeWithProgress(c *C) {
 	d.Progress = output
 
 	n, err := io.ReadFull(d, content)
-	c.Assert(err, IsNil)
-	c.Assert(n, Equals, 26)
-	c.Assert(content, DeepEquals, expected)
+	s.NoError(err)
+	s.Equal(26, n)
+	s.Equal(expected, content)
 
-	progress, err := ioutil.ReadAll(output)
-	c.Assert(err, IsNil)
-	c.Assert(progress, DeepEquals, []byte{'F', 'O', 'O', '\n'})
+	progress, err := io.ReadAll(output)
+	s.NoError(err)
+	s.Equal([]byte{'F', 'O', 'O', '\n'}, progress)
 }
 
-func (s *SidebandSuite) TestDecodeWithUnknownChannel(c *C) {
+func (s *SidebandSuite) TestDecodeFlushEOF() {
+	expected := []byte("abcdefghijklmnopqrstuvwxyz")
 
+	input := bytes.NewBuffer(nil)
+	pktline.Write(input, PackData.WithPayload(expected[0:8]))
+	pktline.Write(input, ProgressMessage.WithPayload([]byte{'F', 'O', 'O', '\n'}))
+	pktline.Write(input, PackData.WithPayload(expected[8:16]))
+	pktline.Write(input, PackData.WithPayload(expected[16:26]))
+	pktline.WriteFlush(input)
+	pktline.Write(input, PackData.WithPayload([]byte("bar\n")))
+
+	output := bytes.NewBuffer(nil)
+	content := bytes.NewBuffer(nil)
+	d := NewDemuxer(Sideband64k, input)
+	d.Progress = output
+
+	n, err := content.ReadFrom(d)
+	s.NoError(err)
+	s.Equal(int64(26), n)
+	s.Equal(expected, content.Bytes())
+
+	progress, err := io.ReadAll(output)
+	s.NoError(err)
+	s.Equal([]byte{'F', 'O', 'O', '\n'}, progress)
+}
+
+func (s *SidebandSuite) TestDecodeWithUnknownChannel() {
 	buf := bytes.NewBuffer(nil)
-	e := pktline.NewEncoder(buf)
-	e.Encode([]byte{'4', 'F', 'O', 'O', '\n'})
+	pktline.Write(buf, []byte{'4', 'F', 'O', 'O', '\n'})
 
 	content := make([]byte, 26)
 	d := NewDemuxer(Sideband64k, buf)
 	n, err := io.ReadFull(d, content)
-	c.Assert(err, ErrorMatches, "unknown channel 4FOO\n")
-	c.Assert(n, Equals, 0)
+	s.ErrorContains(err, "unknown channel 4FOO\n")
+	s.Equal(0, n)
 }
 
-func (s *SidebandSuite) TestDecodeWithPending(c *C) {
+func (s *SidebandSuite) TestDecodeWithPending() {
 	expected := []byte("abcdefghijklmnopqrstuvwxyz")
 
 	buf := bytes.NewBuffer(nil)
-	e := pktline.NewEncoder(buf)
-	e.Encode(PackData.WithPayload(expected[0:8]))
-	e.Encode(PackData.WithPayload(expected[8:16]))
-	e.Encode(PackData.WithPayload(expected[16:26]))
+	pktline.Write(buf, PackData.WithPayload(expected[0:8]))
+	pktline.Write(buf, PackData.WithPayload(expected[8:16]))
+	pktline.Write(buf, PackData.WithPayload(expected[16:26]))
 
 	content := make([]byte, 13)
 	d := NewDemuxer(Sideband64k, buf)
 	n, err := io.ReadFull(d, content)
-	c.Assert(err, IsNil)
-	c.Assert(n, Equals, 13)
-	c.Assert(content, DeepEquals, expected[0:13])
+	s.NoError(err)
+	s.Equal(13, n)
+	s.Equal(expected[0:13], content)
 
 	n, err = d.Read(content)
-	c.Assert(err, IsNil)
-	c.Assert(n, Equals, 13)
-	c.Assert(content, DeepEquals, expected[13:26])
+	s.NoError(err)
+	s.Equal(13, n)
+	s.Equal(expected[13:26], content)
 }
 
-func (s *SidebandSuite) TestDecodeErrMaxPacked(c *C) {
+func (s *SidebandSuite) TestDecodeErrMaxPacked() {
 	buf := bytes.NewBuffer(nil)
-	e := pktline.NewEncoder(buf)
-	e.Encode(PackData.WithPayload(bytes.Repeat([]byte{'0'}, MaxPackedSize+1)))
+	pktline.Write(buf, PackData.WithPayload(bytes.Repeat([]byte{'0'}, MaxPackedSize+1)))
 
 	content := make([]byte, 13)
 	d := NewDemuxer(Sideband, buf)
 	n, err := io.ReadFull(d, content)
-	c.Assert(err, Equals, ErrMaxPackedExceeded)
-	c.Assert(n, Equals, 0)
-
+	s.ErrorIs(err, ErrMaxPackedExceeded)
+	s.Equal(0, n)
 }

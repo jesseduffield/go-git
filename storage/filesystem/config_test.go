@@ -1,49 +1,56 @@
 package filesystem
 
 import (
-	"io/ioutil"
 	"os"
+	"testing"
 
 	"github.com/go-git/go-billy/v5/osfs"
+	"github.com/go-git/go-billy/v5/util"
+	fixtures "github.com/go-git/go-git-fixtures/v4"
 	"github.com/jesseduffield/go-git/v5/config"
 	"github.com/jesseduffield/go-git/v5/storage/filesystem/dotgit"
-
-	fixtures "github.com/go-git/go-git-fixtures/v4"
-	. "gopkg.in/check.v1"
+	"github.com/stretchr/testify/suite"
 )
 
-type ConfigSuite struct {
+type ConfigFixtureSuite struct {
 	fixtures.Suite
+}
+
+type ConfigSuite struct {
+	suite.Suite
+	ConfigFixtureSuite
 
 	dir  *dotgit.DotGit
 	path string
 }
 
-var _ = Suite(&ConfigSuite{})
+func TestConfigSuite(t *testing.T) {
+	suite.Run(t, new(ConfigSuite))
+}
 
-func (s *ConfigSuite) SetUpTest(c *C) {
-	tmp, err := ioutil.TempDir("", "go-git-filestystem-config")
-	c.Assert(err, IsNil)
+func (s *ConfigSuite) SetupTest() {
+	tmp, err := util.TempDir(osfs.Default, "", "go-git-filestystem-config")
+	s.NoError(err)
 
 	s.dir = dotgit.New(osfs.New(tmp))
 	s.path = tmp
 }
 
-func (s *ConfigSuite) TestRemotes(c *C) {
+func (s *ConfigSuite) TestRemotes() {
 	dir := dotgit.New(fixtures.Basic().ByTag(".git").One().DotGit())
 	storer := &ConfigStorage{dir}
 
 	cfg, err := storer.Config()
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
 	remotes := cfg.Remotes
-	c.Assert(remotes, HasLen, 1)
+	s.Len(remotes, 1)
 	remote := remotes["origin"]
-	c.Assert(remote.Name, Equals, "origin")
-	c.Assert(remote.URLs, DeepEquals, []string{"https://github.com/git-fixtures/basic"})
-	c.Assert(remote.Fetch, DeepEquals, []config.RefSpec{config.RefSpec("+refs/heads/*:refs/remotes/origin/*")})
+	s.Equal("origin", remote.Name)
+	s.Equal([]string{"https://github.com/git-fixtures/basic"}, remote.URLs)
+	s.Equal([]config.RefSpec{config.RefSpec("+refs/heads/*:refs/remotes/origin/*")}, remote.Fetch)
 }
 
-func (s *ConfigSuite) TearDownTest(c *C) {
+func (s *ConfigSuite) TearDownTest() {
 	defer os.RemoveAll(s.path)
 }

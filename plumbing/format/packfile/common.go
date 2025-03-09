@@ -1,13 +1,13 @@
 package packfile
 
 import (
-	"bytes"
-	"compress/zlib"
 	"io"
-	"sync"
+	"time"
 
 	"github.com/jesseduffield/go-git/v5/plumbing/storer"
 	"github.com/jesseduffield/go-git/v5/utils/ioutil"
+	"github.com/jesseduffield/go-git/v5/utils/sync"
+	"github.com/jesseduffield/go-git/v5/utils/trace"
 )
 
 var signature = []byte{'P', 'A', 'C', 'K'}
@@ -27,16 +27,18 @@ const (
 // UpdateObjectStorage updates the storer with the objects in the given
 // packfile.
 func UpdateObjectStorage(s storer.Storer, packfile io.Reader) error {
+	start := time.Now()
+	defer func() {
+		trace.Performance.Printf("performance: %.9f s: update_obj_storage", time.Since(start).Seconds())
+	}()
+
 	if pw, ok := s.(storer.PackfileWriter); ok {
 		return WritePackfileToObjectStorage(pw, packfile)
 	}
 
-	p, err := NewParserWithStorage(NewScanner(packfile), s)
-	if err != nil {
-		return err
-	}
+	p := NewParser(packfile, WithStorage(s))
 
-	_, err = p.Parse()
+	_, err := p.Parse()
 	return err
 }
 
@@ -52,27 +54,15 @@ func WritePackfileToObjectStorage(
 	}
 
 	defer ioutil.CheckClose(w, &err)
-
 	var n int64
-	n, err = io.Copy(w, packfile)
+
+	buf := sync.GetByteSlice()
+	n, err = io.CopyBuffer(w, packfile, *buf)
+	sync.PutByteSlice(buf)
+
 	if err == nil && n == 0 {
 		return ErrEmptyPackfile
 	}
 
 	return err
-}
-
-var bufPool = sync.Pool{
-	New: func() interface{} {
-		return bytes.NewBuffer(nil)
-	},
-}
-
-var zlibInitBytes = []byte{0x78, 0x9c, 0x01, 0x00, 0x00, 0xff, 0xff, 0x00, 0x00, 0x00, 0x01}
-
-var zlibReaderPool = sync.Pool{
-	New: func() interface{} {
-		r, _ := zlib.NewReader(bytes.NewReader(zlibInitBytes))
-		return r
-	},
 }

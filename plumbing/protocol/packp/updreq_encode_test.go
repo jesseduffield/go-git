@@ -2,40 +2,44 @@ package packp
 
 import (
 	"bytes"
+	"fmt"
+	"io"
+	"testing"
 
 	"github.com/jesseduffield/go-git/v5/plumbing"
-	"github.com/jesseduffield/go-git/v5/plumbing/format/pktline"
-
-	"io/ioutil"
-
-	. "gopkg.in/check.v1"
+	"github.com/jesseduffield/go-git/v5/plumbing/protocol/packp/capability"
+	"github.com/stretchr/testify/suite"
 )
 
-type UpdReqEncodeSuite struct{}
+type UpdReqEncodeSuite struct {
+	suite.Suite
+}
 
-var _ = Suite(&UpdReqEncodeSuite{})
+func TestUpdReqEncodeSuite(t *testing.T) {
+	suite.Run(t, new(UpdReqEncodeSuite))
+}
 
-func (s *UpdReqEncodeSuite) testEncode(c *C, input *ReferenceUpdateRequest,
+func (s *UpdReqEncodeSuite) testEncode(input *ReferenceUpdateRequest,
 	expected []byte) {
 
 	var buf bytes.Buffer
-	c.Assert(input.Encode(&buf), IsNil)
+	s.Nil(input.Encode(&buf))
 	obtained := buf.Bytes()
 
-	comment := Commentf("\nobtained = %s\nexpected = %s\n", string(obtained), string(expected))
-	c.Assert(obtained, DeepEquals, expected, comment)
+	comment := fmt.Sprintf("\nobtained = %s\nexpected = %s\n", string(obtained), string(expected))
+	s.Equal(expected, obtained, comment)
 }
 
-func (s *UpdReqEncodeSuite) TestZeroValue(c *C) {
+func (s *UpdReqEncodeSuite) TestZeroValue() {
 	r := &ReferenceUpdateRequest{}
 	var buf bytes.Buffer
-	c.Assert(r.Encode(&buf), Equals, ErrEmptyCommands)
+	s.Equal(ErrEmptyCommands, r.Encode(&buf))
 
 	r = NewReferenceUpdateRequest()
-	c.Assert(r.Encode(&buf), Equals, ErrEmptyCommands)
+	s.Equal(ErrEmptyCommands, r.Encode(&buf))
 }
 
-func (s *UpdReqEncodeSuite) TestOneUpdateCommand(c *C) {
+func (s *UpdReqEncodeSuite) TestOneUpdateCommand() {
 	hash1 := plumbing.NewHash("1ecf0ef2c2dffb796033e5a02219af86ec6584e5")
 	hash2 := plumbing.NewHash("2ecf0ef2c2dffb796033e5a02219af86ec6584e5")
 	name := plumbing.ReferenceName("myref")
@@ -45,15 +49,15 @@ func (s *UpdReqEncodeSuite) TestOneUpdateCommand(c *C) {
 		{Name: name, Old: hash1, New: hash2},
 	}
 
-	expected := pktlines(c,
+	expected := pktlines(s.T(),
 		"1ecf0ef2c2dffb796033e5a02219af86ec6584e5 2ecf0ef2c2dffb796033e5a02219af86ec6584e5 myref\x00",
-		pktline.FlushString,
+		"",
 	)
 
-	s.testEncode(c, r, expected)
+	s.testEncode(r, expected)
 }
 
-func (s *UpdReqEncodeSuite) TestMultipleCommands(c *C) {
+func (s *UpdReqEncodeSuite) TestMultipleCommands() {
 	hash1 := plumbing.NewHash("1ecf0ef2c2dffb796033e5a02219af86ec6584e5")
 	hash2 := plumbing.NewHash("2ecf0ef2c2dffb796033e5a02219af86ec6584e5")
 
@@ -64,17 +68,17 @@ func (s *UpdReqEncodeSuite) TestMultipleCommands(c *C) {
 		{Name: plumbing.ReferenceName("myref3"), Old: hash1, New: plumbing.ZeroHash},
 	}
 
-	expected := pktlines(c,
+	expected := pktlines(s.T(),
 		"1ecf0ef2c2dffb796033e5a02219af86ec6584e5 2ecf0ef2c2dffb796033e5a02219af86ec6584e5 myref1\x00",
 		"0000000000000000000000000000000000000000 2ecf0ef2c2dffb796033e5a02219af86ec6584e5 myref2",
 		"1ecf0ef2c2dffb796033e5a02219af86ec6584e5 0000000000000000000000000000000000000000 myref3",
-		pktline.FlushString,
+		"",
 	)
 
-	s.testEncode(c, r, expected)
+	s.testEncode(r, expected)
 }
 
-func (s *UpdReqEncodeSuite) TestMultipleCommandsAndCapabilities(c *C) {
+func (s *UpdReqEncodeSuite) TestMultipleCommandsAndCapabilities() {
 	hash1 := plumbing.NewHash("1ecf0ef2c2dffb796033e5a02219af86ec6584e5")
 	hash2 := plumbing.NewHash("2ecf0ef2c2dffb796033e5a02219af86ec6584e5")
 
@@ -86,17 +90,17 @@ func (s *UpdReqEncodeSuite) TestMultipleCommandsAndCapabilities(c *C) {
 	}
 	r.Capabilities.Add("shallow")
 
-	expected := pktlines(c,
+	expected := pktlines(s.T(),
 		"1ecf0ef2c2dffb796033e5a02219af86ec6584e5 2ecf0ef2c2dffb796033e5a02219af86ec6584e5 myref1\x00shallow",
 		"0000000000000000000000000000000000000000 2ecf0ef2c2dffb796033e5a02219af86ec6584e5 myref2",
 		"1ecf0ef2c2dffb796033e5a02219af86ec6584e5 0000000000000000000000000000000000000000 myref3",
-		pktline.FlushString,
+		"",
 	)
 
-	s.testEncode(c, r, expected)
+	s.testEncode(r, expected)
 }
 
-func (s *UpdReqEncodeSuite) TestMultipleCommandsAndCapabilitiesShallow(c *C) {
+func (s *UpdReqEncodeSuite) TestMultipleCommandsAndCapabilitiesShallow() {
 	hash1 := plumbing.NewHash("1ecf0ef2c2dffb796033e5a02219af86ec6584e5")
 	hash2 := plumbing.NewHash("2ecf0ef2c2dffb796033e5a02219af86ec6584e5")
 
@@ -109,25 +113,25 @@ func (s *UpdReqEncodeSuite) TestMultipleCommandsAndCapabilitiesShallow(c *C) {
 	r.Capabilities.Add("shallow")
 	r.Shallow = &hash1
 
-	expected := pktlines(c,
+	expected := pktlines(s.T(),
 		"shallow 1ecf0ef2c2dffb796033e5a02219af86ec6584e5",
 		"1ecf0ef2c2dffb796033e5a02219af86ec6584e5 2ecf0ef2c2dffb796033e5a02219af86ec6584e5 myref1\x00shallow",
 		"0000000000000000000000000000000000000000 2ecf0ef2c2dffb796033e5a02219af86ec6584e5 myref2",
 		"1ecf0ef2c2dffb796033e5a02219af86ec6584e5 0000000000000000000000000000000000000000 myref3",
-		pktline.FlushString,
+		"",
 	)
 
-	s.testEncode(c, r, expected)
+	s.testEncode(r, expected)
 }
 
-func (s *UpdReqEncodeSuite) TestWithPackfile(c *C) {
+func (s *UpdReqEncodeSuite) TestWithPackfile() {
 	hash1 := plumbing.NewHash("1ecf0ef2c2dffb796033e5a02219af86ec6584e5")
 	hash2 := plumbing.NewHash("2ecf0ef2c2dffb796033e5a02219af86ec6584e5")
 	name := plumbing.ReferenceName("myref")
 
 	packfileContent := []byte("PACKabc")
 	packfileReader := bytes.NewReader(packfileContent)
-	packfileReadCloser := ioutil.NopCloser(packfileReader)
+	packfileReadCloser := io.NopCloser(packfileReader)
 
 	r := NewReferenceUpdateRequest()
 	r.Commands = []*Command{
@@ -135,11 +139,56 @@ func (s *UpdReqEncodeSuite) TestWithPackfile(c *C) {
 	}
 	r.Packfile = packfileReadCloser
 
-	expected := pktlines(c,
+	expected := pktlines(s.T(),
 		"1ecf0ef2c2dffb796033e5a02219af86ec6584e5 2ecf0ef2c2dffb796033e5a02219af86ec6584e5 myref\x00",
-		pktline.FlushString,
+		"",
 	)
 	expected = append(expected, packfileContent...)
 
-	s.testEncode(c, r, expected)
+	s.testEncode(r, expected)
+}
+
+func (s *UpdReqEncodeSuite) TestPushOptions() {
+	hash1 := plumbing.NewHash("1ecf0ef2c2dffb796033e5a02219af86ec6584e5")
+	hash2 := plumbing.NewHash("2ecf0ef2c2dffb796033e5a02219af86ec6584e5")
+	name := plumbing.ReferenceName("myref")
+
+	r := NewReferenceUpdateRequest()
+	r.Capabilities.Set(capability.PushOptions)
+	r.Commands = []*Command{
+		{Name: name, Old: hash1, New: hash2},
+	}
+	r.Options = []*Option{
+		{Key: "SomeKey", Value: "SomeValue"},
+		{Key: "AnotherKey", Value: "AnotherValue"},
+	}
+
+	expected := pktlines(s.T(),
+		"1ecf0ef2c2dffb796033e5a02219af86ec6584e5 2ecf0ef2c2dffb796033e5a02219af86ec6584e5 myref\x00push-options",
+		"",
+		"SomeKey=SomeValue",
+		"AnotherKey=AnotherValue",
+		"",
+	)
+
+	s.testEncode(r, expected)
+}
+
+func (s *UpdReqEncodeSuite) TestPushAtomic() {
+	hash1 := plumbing.NewHash("1ecf0ef2c2dffb796033e5a02219af86ec6584e5")
+	hash2 := plumbing.NewHash("2ecf0ef2c2dffb796033e5a02219af86ec6584e5")
+	name := plumbing.ReferenceName("myref")
+
+	r := NewReferenceUpdateRequest()
+	r.Capabilities.Set(capability.Atomic)
+	r.Commands = []*Command{
+		{Name: name, Old: hash1, New: hash2},
+	}
+
+	expected := pktlines(s.T(),
+		"1ecf0ef2c2dffb796033e5a02219af86ec6584e5 2ecf0ef2c2dffb796033e5a02219af86ec6584e5 myref\x00atomic",
+		"",
+	)
+
+	s.testEncode(r, expected)
 }

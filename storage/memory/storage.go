@@ -3,6 +3,7 @@ package memory
 
 import (
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/jesseduffield/go-git/v5/config"
@@ -10,6 +11,7 @@ import (
 	"github.com/jesseduffield/go-git/v5/plumbing/format/index"
 	"github.com/jesseduffield/go-git/v5/plumbing/storer"
 	"github.com/jesseduffield/go-git/v5/storage"
+	"github.com/jesseduffield/go-git/v5/utils/ioutil"
 )
 
 var ErrUnsupportedObjectType = fmt.Errorf("unsupported object type")
@@ -88,6 +90,39 @@ type ObjectStorage struct {
 	Trees   map[plumbing.Hash]plumbing.EncodedObject
 	Blobs   map[plumbing.Hash]plumbing.EncodedObject
 	Tags    map[plumbing.Hash]plumbing.EncodedObject
+}
+
+type lazyCloser struct {
+	storage *ObjectStorage
+	obj     plumbing.EncodedObject
+	closer  io.Closer
+}
+
+func (c *lazyCloser) Close() error {
+	err := c.closer.Close()
+	if err != nil {
+		return fmt.Errorf("failed to close memory encoded object: %w", err)
+	}
+
+	_, err = c.storage.SetEncodedObject(c.obj)
+	return err
+}
+
+func (o *ObjectStorage) RawObjectWriter(typ plumbing.ObjectType, sz int64) (w io.WriteCloser, err error) {
+	obj := o.NewEncodedObject()
+	obj.SetType(typ)
+	obj.SetSize(sz)
+
+	w, err = obj.Writer()
+	if err != nil {
+		return nil, err
+	}
+
+	wc := ioutil.NewWriteCloser(w,
+		&lazyCloser{storage: o, obj: obj, closer: w},
+	)
+
+	return wc, nil
 }
 
 func (o *ObjectStorage) NewEncodedObject() plumbing.EncodedObject {
@@ -193,12 +228,16 @@ func (o *ObjectStorage) DeleteOldObjectPackAndIndex(plumbing.Hash, time.Time) er
 	return nil
 }
 
-var errNotSupported = fmt.Errorf("Not supported")
+var errNotSupported = fmt.Errorf("not supported")
 
 func (o *ObjectStorage) LooseObjectTime(hash plumbing.Hash) (time.Time, error) {
 	return time.Time{}, errNotSupported
 }
 func (o *ObjectStorage) DeleteLooseObject(plumbing.Hash) error {
+	return errNotSupported
+}
+
+func (o *ObjectStorage) AddAlternate(remote string) error {
 	return errNotSupported
 }
 

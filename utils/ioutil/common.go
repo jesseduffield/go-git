@@ -6,24 +6,26 @@ import (
 	"context"
 	"errors"
 	"io"
-
-	"github.com/jbenet/go-context/io"
 )
 
-type readPeeker interface {
-	io.Reader
+// Peeker is an interface for types that can peek at the next bytes.
+type Peeker interface {
 	Peek(int) ([]byte, error)
 }
 
-var (
-	ErrEmptyReader = errors.New("reader is empty")
-)
+// ReadPeeker is an interface that groups the basic Read and Peek methods.
+type ReadPeeker interface {
+	io.Reader
+	Peeker
+}
+
+var ErrEmptyReader = errors.New("reader is empty")
 
 // NonEmptyReader takes a reader and returns it if it is not empty, or
 // `ErrEmptyReader` if it is empty. If there is an error when reading the first
 // byte of the given reader, it will be propagated.
 func NonEmptyReader(r io.Reader) (io.Reader, error) {
-	pr, ok := r.(readPeeker)
+	pr, ok := r.(ReadPeeker)
 	if !ok {
 		pr = bufio.NewReader(r)
 	}
@@ -55,12 +57,37 @@ func NewReadCloser(r io.Reader, c io.Closer) io.ReadCloser {
 	return &readCloser{Reader: r, closer: c}
 }
 
+type readCloserCloser struct {
+	io.ReadCloser
+	closer func() error
+}
+
+func (r *readCloserCloser) Close() (err error) {
+	defer func() {
+		if err == nil {
+			err = r.closer()
+			return
+		}
+		_ = r.closer()
+	}()
+	return r.ReadCloser.Close()
+}
+
+// NewReadCloserWithCloser creates an `io.ReadCloser` with the given `io.ReaderCloser` and
+// `io.Closer` that ensures that the closer is closed on close
+func NewReadCloserWithCloser(r io.ReadCloser, c func() error) io.ReadCloser {
+	return &readCloserCloser{ReadCloser: r, closer: c}
+}
+
 type writeCloser struct {
 	io.Writer
 	closer io.Closer
 }
 
 func (r *writeCloser) Close() error {
+	if r.closer == nil {
+		return nil
+	}
 	return r.closer.Close()
 }
 
@@ -82,6 +109,24 @@ func WriteNopCloser(w io.Writer) io.WriteCloser {
 	return writeNopCloser{w}
 }
 
+type readerAtAsReader struct {
+	io.ReaderAt
+	offset int64
+}
+
+func (r *readerAtAsReader) Read(bs []byte) (int, error) {
+	n, err := r.ReaderAt.ReadAt(bs, r.offset)
+	r.offset += int64(n)
+	return n, err
+}
+
+func NewReaderUsingReaderAt(r io.ReaderAt, offset int64) io.Reader {
+	return &readerAtAsReader{
+		ReaderAt: r,
+		offset:   offset,
+	}
+}
+
 // CheckClose calls Close on the given io.Closer. If the given *error points to
 // nil, it will be assigned the error returned by Close. Otherwise, any error
 // returned by Close will be ignored. CheckClose is usually called with defer.
@@ -91,29 +136,15 @@ func CheckClose(c io.Closer, err *error) {
 	}
 }
 
-// NewContextWriter wraps a writer to make it respect given Context.
-// If there is a blocking write, the returned Writer will return whenever the
-// context is cancelled (the return values are n=0 and err=ctx.Err()).
-func NewContextWriter(ctx context.Context, w io.Writer) io.Writer {
-	return ctxio.NewWriter(ctx, w)
-}
-
-// NewContextReader wraps a reader to make it respect given Context.
-// If there is a blocking read, the returned Reader will return whenever the
-// context is cancelled (the return values are n=0 and err=ctx.Err()).
-func NewContextReader(ctx context.Context, r io.Reader) io.Reader {
-	return ctxio.NewReader(ctx, r)
-}
-
 // NewContextWriteCloser as NewContextWriter but with io.Closer interface.
 func NewContextWriteCloser(ctx context.Context, w io.WriteCloser) io.WriteCloser {
-	ctxw := ctxio.NewWriter(ctx, w)
+	ctxw := NewContextWriter(ctx, w)
 	return NewWriteCloser(ctxw, w)
 }
 
 // NewContextReadCloser as NewContextReader but with io.Closer interface.
 func NewContextReadCloser(ctx context.Context, r io.ReadCloser) io.ReadCloser {
-	ctxr := ctxio.NewReader(ctx, r)
+	ctxr := NewContextReader(ctx, r)
 	return NewReadCloser(ctxr, r)
 }
 
@@ -155,7 +186,7 @@ func NewWriterOnError(w io.Writer, notify func(error)) io.Writer {
 }
 
 // NewWriteCloserOnError returns a io.WriteCloser that call the notify function
-//when an unexpected (!io.EOF) error happens, after call Write function.
+// when an unexpected (!io.EOF) error happens, after call Write function.
 func NewWriteCloserOnError(w io.WriteCloser, notify func(error)) io.WriteCloser {
 	return NewWriteCloser(NewWriterOnError(w, notify), w)
 }
@@ -167,4 +198,14 @@ func (r *writerOnError) Write(p []byte) (n int, err error) {
 	}
 
 	return
+}
+
+// CloserFunc implements the io.Closer interface with a function.
+type CloserFunc func() error
+
+var _ io.Closer = CloserFunc(nil)
+
+// Close calls the function.
+func (f CloserFunc) Close() error {
+	return f()
 }

@@ -34,6 +34,13 @@ type Options struct {
 	// MaxOpenDescriptors is the max number of file descriptors to keep
 	// open. If KeepDescriptors is true, all file descriptors will remain open.
 	MaxOpenDescriptors int
+	// LargeObjectThreshold maximum object size (in bytes) that will be read in to memory.
+	// If left unset or set to 0 there is no limit
+	LargeObjectThreshold int64
+	// AlternatesFS provides the billy filesystem to be used for Git Alternates.
+	// If none is provided, it falls back to using the underlying instance used for
+	// DotGit.
+	AlternatesFS billy.Filesystem
 }
 
 // NewStorage returns a new Storage backed by a given `fs.Filesystem` and cache.
@@ -43,17 +50,22 @@ func NewStorage(fs billy.Filesystem, cache cache.Object) *Storage {
 
 // NewStorageWithOptions returns a new Storage with extra options,
 // backed by a given `fs.Filesystem` and cache.
-func NewStorageWithOptions(fs billy.Filesystem, cache cache.Object, ops Options) *Storage {
+func NewStorageWithOptions(fs billy.Filesystem, c cache.Object, ops Options) *Storage {
 	dirOps := dotgit.Options{
 		ExclusiveAccess: ops.ExclusiveAccess,
+		AlternatesFS:    ops.AlternatesFS,
 	}
 	dir := dotgit.NewWithOptions(fs, dirOps)
+
+	if c == nil {
+		c = cache.NewObjectLRUDefault()
+	}
 
 	return &Storage{
 		fs:  fs,
 		dir: dir,
 
-		ObjectStorage:    *NewObjectStorageWithOptions(dir, cache, ops),
+		ObjectStorage:    *NewObjectStorageWithOptions(dir, c, ops),
 		ReferenceStorage: ReferenceStorage{dir: dir},
 		IndexStorage:     IndexStorage{dir: dir},
 		ShallowStorage:   ShallowStorage{dir: dir},
@@ -70,4 +82,8 @@ func (s *Storage) Filesystem() billy.Filesystem {
 // Init initializes .git directory
 func (s *Storage) Init() error {
 	return s.dir.Initialize()
+}
+
+func (s *Storage) AddAlternate(remote string) error {
+	return s.dir.AddAlternate(remote)
 }

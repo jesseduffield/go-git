@@ -2,26 +2,31 @@ package commitgraph
 
 import (
 	"bytes"
+	"crypto"
 	encbin "encoding/binary"
 	"errors"
 	"io"
 	"time"
 
 	"github.com/jesseduffield/go-git/v5/plumbing"
+	"github.com/jesseduffield/go-git/v5/plumbing/hash"
 	"github.com/jesseduffield/go-git/v5/utils/binary"
 )
+
+// Deprecated: This package uses the wrong types for Generation and Index in CommitData.
+// Use the v2 package instead.
 
 var (
 	// ErrUnsupportedVersion is returned by OpenFileIndex when the commit graph
 	// file version is not supported.
-	ErrUnsupportedVersion = errors.New("Unsupported version")
+	ErrUnsupportedVersion = errors.New("unsupported version")
 	// ErrUnsupportedHash is returned by OpenFileIndex when the commit graph
 	// hash function is not supported. Currently only SHA-1 is defined and
 	// supported
-	ErrUnsupportedHash = errors.New("Unsupported hash algorithm")
+	ErrUnsupportedHash = errors.New("unsupported hash algorithm")
 	// ErrMalformedCommitGraphFile is returned by OpenFileIndex when the commit
 	// graph file is corrupted.
-	ErrMalformedCommitGraphFile = errors.New("Malformed commit graph file")
+	ErrMalformedCommitGraphFile = errors.New("malformed commit graph file")
 
 	commitFileSignature    = []byte{'C', 'G', 'P', 'H'}
 	oidFanoutSignature     = []byte{'O', 'I', 'D', 'F'}
@@ -36,6 +41,8 @@ var (
 	parentLast        = uint32(0x80000000)
 )
 
+const commitDataSize = 16
+
 type fileIndex struct {
 	reader              io.ReaderAt
 	fanout              [256]int
@@ -47,6 +54,9 @@ type fileIndex struct {
 
 // OpenFileIndex opens a serialized commit graph file in the format described at
 // https://github.com/git/git/blob/master/Documentation/technical/commit-graph-format.txt
+//
+// Deprecated: This package uses the wrong types for Generation and Index in CommitData.
+// Use the v2 package instead.
 func OpenFileIndex(reader io.ReaderAt) (Index, error) {
 	fi := &fileIndex{reader: reader}
 
@@ -65,7 +75,7 @@ func OpenFileIndex(reader io.ReaderAt) (Index, error) {
 
 func (fi *fileIndex) verifyFileHeader() error {
 	// Verify file signature
-	var signature = make([]byte, 4)
+	signature := make([]byte, 4)
 	if _, err := fi.reader.ReadAt(signature, 0); err != nil {
 		return err
 	}
@@ -74,22 +84,31 @@ func (fi *fileIndex) verifyFileHeader() error {
 	}
 
 	// Read and verify the file header
-	var header = make([]byte, 4)
+	header := make([]byte, 4)
 	if _, err := fi.reader.ReadAt(header, 4); err != nil {
 		return err
 	}
 	if header[0] != 1 {
 		return ErrUnsupportedVersion
 	}
-	if header[1] != 1 {
-		return ErrUnsupportedHash
+	if hash.CryptoType == crypto.SHA1 {
+		if header[1] != 1 {
+			return ErrUnsupportedVersion
+		}
+	} else if hash.CryptoType == crypto.SHA256 {
+		if header[1] != 2 {
+			return ErrUnsupportedVersion
+		}
+	} else {
+		// Unknown hash type
+		return ErrUnsupportedVersion
 	}
 
 	return nil
 }
 
 func (fi *fileIndex) readChunkHeaders() error {
-	var chunkID = make([]byte, 4)
+	chunkID := make([]byte, 4)
 	for i := 0; ; i++ {
 		chunkHeader := io.NewSectionReader(fi.reader, 8+(int64(i)*12), 12)
 		if _, err := io.ReadAtLeast(chunkHeader, chunkID, 4); err != nil {
@@ -148,7 +167,7 @@ func (fi *fileIndex) GetIndexByHash(h plumbing.Hash) (int, error) {
 	high := fi.fanout[h[0]]
 	for low < high {
 		mid := (low + high) >> 1
-		offset := fi.oidLookupOffset + int64(mid)*20
+		offset := fi.oidLookupOffset + int64(mid)*hash.Size
 		if _, err := fi.reader.ReadAt(oid[:], offset); err != nil {
 			return 0, err
 		}
@@ -170,8 +189,8 @@ func (fi *fileIndex) GetCommitDataByIndex(idx int) (*CommitData, error) {
 		return nil, plumbing.ErrObjectNotFound
 	}
 
-	offset := fi.commitDataOffset + int64(idx)*36
-	commitDataReader := io.NewSectionReader(fi.reader, offset, 36)
+	offset := fi.commitDataOffset + int64(idx)*(hash.Size+commitDataSize)
+	commitDataReader := io.NewSectionReader(fi.reader, offset, hash.Size+commitDataSize)
 
 	treeHash, err := binary.ReadHash(commitDataReader)
 	if err != nil {
@@ -237,7 +256,7 @@ func (fi *fileIndex) getHashesFromIndexes(indexes []int) ([]plumbing.Hash, error
 			return nil, ErrMalformedCommitGraphFile
 		}
 
-		offset := fi.oidLookupOffset + int64(idx)*20
+		offset := fi.oidLookupOffset + int64(idx)*hash.Size
 		if _, err := fi.reader.ReadAt(hashes[i][:], offset); err != nil {
 			return nil, err
 		}
@@ -250,8 +269,8 @@ func (fi *fileIndex) getHashesFromIndexes(indexes []int) ([]plumbing.Hash, error
 func (fi *fileIndex) Hashes() []plumbing.Hash {
 	hashes := make([]plumbing.Hash, fi.fanout[0xff])
 	for i := 0; i < fi.fanout[0xff]; i++ {
-		offset := fi.oidLookupOffset + int64(i)*20
-		if n, err := fi.reader.ReadAt(hashes[i][:], offset); err != nil || n < 20 {
+		offset := fi.oidLookupOffset + int64(i)*hash.Size
+		if n, err := fi.reader.ReadAt(hashes[i][:], offset); err != nil || n < hash.Size {
 			return nil
 		}
 	}

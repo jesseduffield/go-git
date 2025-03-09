@@ -2,69 +2,148 @@ package git
 
 import (
 	"bytes"
-	"io/ioutil"
+	"fmt"
+	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"testing"
 	"time"
 
+	fixtures "github.com/go-git/go-git-fixtures/v4"
 	"github.com/jesseduffield/go-git/v5/plumbing"
 	"github.com/jesseduffield/go-git/v5/plumbing/cache"
 	"github.com/jesseduffield/go-git/v5/plumbing/object"
 	"github.com/jesseduffield/go-git/v5/plumbing/storer"
 	"github.com/jesseduffield/go-git/v5/storage/filesystem"
 	"github.com/jesseduffield/go-git/v5/storage/memory"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/ProtonMail/go-crypto/openpgp"
+	"github.com/ProtonMail/go-crypto/openpgp/armor"
+	"github.com/ProtonMail/go-crypto/openpgp/errors"
 	"github.com/go-git/go-billy/v5/memfs"
-	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/go-git/go-billy/v5/util"
-	"golang.org/x/crypto/openpgp"
-	"golang.org/x/crypto/openpgp/armor"
-	"golang.org/x/crypto/openpgp/errors"
-	. "gopkg.in/check.v1"
 )
 
-func (s *WorktreeSuite) TestCommitEmptyOptions(c *C) {
-	r, err := Init(memory.NewStorage(), memfs.New())
-	c.Assert(err, IsNil)
+func (s *WorktreeSuite) TestCommitEmptyOptions() {
+	fs := memfs.New()
+	r, err := Init(memory.NewStorage(), fs)
+	s.NoError(err)
 
 	w, err := r.Worktree()
-	c.Assert(err, IsNil)
+	s.NoError(err)
+
+	util.WriteFile(fs, "foo", []byte("foo"), 0644)
+
+	_, err = w.Add("foo")
+	s.NoError(err)
 
 	hash, err := w.Commit("foo", &CommitOptions{})
-	c.Assert(err, IsNil)
-	c.Assert(hash.IsZero(), Equals, false)
+	s.NoError(err)
+	s.False(hash.IsZero())
 
 	commit, err := r.CommitObject(hash)
-	c.Assert(err, IsNil)
-	c.Assert(commit.Author.Name, Not(Equals), "")
+	s.NoError(err)
+	s.NotEqual("", commit.Author.Name)
 }
 
-func (s *WorktreeSuite) TestCommitInitial(c *C) {
+func (s *WorktreeSuite) TestCommitInitial() {
 	expected := plumbing.NewHash("98c4ac7c29c913f7461eae06e024dc18e80d23a4")
 
 	fs := memfs.New()
 	storage := memory.NewStorage()
 
 	r, err := Init(storage, fs)
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
 	w, err := r.Worktree()
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
 	util.WriteFile(fs, "foo", []byte("foo"), 0644)
 
 	_, err = w.Add("foo")
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
 	hash, err := w.Commit("foo\n", &CommitOptions{Author: defaultSignature()})
-	c.Assert(hash, Equals, expected)
-	c.Assert(err, IsNil)
+	s.Equal(expected, hash)
+	s.NoError(err)
 
-	assertStorageStatus(c, r, 1, 1, 1, expected)
+	assertStorageStatus(s, r, 1, 1, 1, expected)
 }
 
-func (s *WorktreeSuite) TestCommitParent(c *C) {
+func (s *WorktreeSuite) TestNothingToCommit() {
+	expected := plumbing.NewHash("838ea833ce893e8555907e5ef224aa076f5e274a")
+
+	r, err := Init(memory.NewStorage(), memfs.New())
+	s.NoError(err)
+
+	w, err := r.Worktree()
+	s.NoError(err)
+
+	hash, err := w.Commit("failed empty commit\n", &CommitOptions{Author: defaultSignature()})
+	s.Equal(plumbing.ZeroHash, hash)
+	s.ErrorIs(err, ErrEmptyCommit)
+
+	hash, err = w.Commit("enable empty commits\n", &CommitOptions{Author: defaultSignature(), AllowEmptyCommits: true})
+	s.Equal(expected, hash)
+	s.NoError(err)
+}
+
+func (s *WorktreeSuite) TestNothingToCommitNonEmptyRepo() {
+	fs := memfs.New()
+	r, err := Init(memory.NewStorage(), fs)
+	s.NoError(err)
+
+	w, err := r.Worktree()
+	s.NoError(err)
+
+	err = util.WriteFile(fs, "foo", []byte("foo"), 0644)
+	s.NoError(err)
+
+	w.Add("foo")
+	_, err = w.Commit("previous commit\n", &CommitOptions{Author: defaultSignature()})
+	s.NoError(err)
+
+	hash, err := w.Commit("failed empty commit\n", &CommitOptions{Author: defaultSignature()})
+	s.Equal(plumbing.ZeroHash, hash)
+	s.ErrorIs(err, ErrEmptyCommit)
+
+	_, err = w.Commit("enable empty commits\n", &CommitOptions{Author: defaultSignature(), AllowEmptyCommits: true})
+	s.NoError(err)
+}
+
+func (s *WorktreeSuite) TestRemoveAndCommitToMakeEmptyRepo() {
+	fs := memfs.New()
+	r, err := Init(memory.NewStorage(), fs)
+	s.NoError(err)
+
+	w, err := r.Worktree()
+	s.NoError(err)
+
+	err = util.WriteFile(fs, "foo", []byte("foo"), 0644)
+	s.NoError(err)
+
+	_, err = w.Add("foo")
+	s.NoError(err)
+
+	_, err = w.Commit("Add in Repo\n", &CommitOptions{Author: defaultSignature()})
+	s.NoError(err)
+
+	err = fs.Remove("foo")
+	s.NoError(err)
+
+	_, err = w.Add("foo")
+	s.NoError(err)
+
+	_, err = w.Commit("Remove foo\n", &CommitOptions{Author: defaultSignature()})
+	s.NoError(err)
+}
+
+func (s *WorktreeSuite) TestCommitParent() {
 	expected := plumbing.NewHash("ef3ca05477530b37f48564be33ddd48063fc7a22")
 
 	fs := memfs.New()
@@ -74,21 +153,321 @@ func (s *WorktreeSuite) TestCommitParent(c *C) {
 	}
 
 	err := w.Checkout(&CheckoutOptions{})
-	c.Assert(err, IsNil)
+	s.NoError(err)
+
+	err = util.WriteFile(fs, "foo", []byte("foo"), 0644)
+	s.NoError(err)
+
+	_, err = w.Add("foo")
+	s.NoError(err)
+
+	hash, err := w.Commit("foo\n", &CommitOptions{Author: defaultSignature()})
+	s.Equal(expected, hash)
+	s.NoError(err)
+
+	assertStorageStatus(s, s.Repository, 13, 11, 10, expected)
+}
+
+func (s *WorktreeSuite) TestCommitAmendWithoutChanges() {
+	fs := memfs.New()
+	w := &Worktree{
+		r:          s.Repository,
+		Filesystem: fs,
+	}
+
+	err := w.Checkout(&CheckoutOptions{})
+	s.NoError(err)
+
+	err = util.WriteFile(fs, "foo", []byte("foo"), 0644)
+	s.NoError(err)
+
+	_, err = w.Add("foo")
+	s.NoError(err)
+
+	prevHash, err := w.Commit("foo\n", &CommitOptions{Author: defaultSignature()})
+	s.NoError(err)
+
+	amendedHash, err := w.Commit("foo\n", &CommitOptions{Author: defaultSignature(), Amend: true})
+	s.NoError(err)
+
+	headRef, err := w.r.Head()
+	s.NoError(err)
+
+	s.Equal(headRef.Hash(), amendedHash)
+	s.Equal(prevHash, amendedHash)
+
+	commit, err := w.r.CommitObject(headRef.Hash())
+	s.NoError(err)
+	s.Equal("foo\n", commit.Message)
+
+	assertStorageStatus(s, s.Repository, 13, 11, 10, amendedHash)
+}
+
+func (s *WorktreeSuite) TestCommitAmendWithChanges() {
+	fs := memfs.New()
+	w := &Worktree{
+		r:          s.Repository,
+		Filesystem: fs,
+	}
+
+	err := w.Checkout(&CheckoutOptions{})
+	s.NoError(err)
 
 	util.WriteFile(fs, "foo", []byte("foo"), 0644)
 
 	_, err = w.Add("foo")
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
-	hash, err := w.Commit("foo\n", &CommitOptions{Author: defaultSignature()})
-	c.Assert(hash, Equals, expected)
-	c.Assert(err, IsNil)
+	_, err = w.Commit("foo\n", &CommitOptions{Author: defaultSignature()})
+	s.NoError(err)
 
-	assertStorageStatus(c, s.Repository, 13, 11, 10, expected)
+	util.WriteFile(fs, "bar", []byte("bar"), 0644)
+
+	_, err = w.Add("bar")
+	s.NoError(err)
+
+	amendedHash, err := w.Commit("bar\n", &CommitOptions{Amend: true})
+	s.NoError(err)
+
+	headRef, err := w.r.Head()
+	s.NoError(err)
+
+	s.Equal(headRef.Hash(), amendedHash)
+
+	commit, err := w.r.CommitObject(headRef.Hash())
+	s.NoError(err)
+	s.Equal("bar\n", commit.Message)
+	s.Equal(1, commit.NumParents())
+
+	stats, err := commit.Stats()
+	s.NoError(err)
+	s.Len(stats, 2)
+	s.Equal(object.FileStat{
+		Name:     "bar",
+		Addition: 1,
+	}, stats[0])
+	s.Equal(object.FileStat{
+		Name:     "foo",
+		Addition: 1,
+	}, stats[1])
+
+	assertStorageStatus(s, s.Repository, 14, 12, 11, amendedHash)
 }
 
-func (s *WorktreeSuite) TestCommitAll(c *C) {
+func (s *WorktreeSuite) TestCommitAmendNothingToCommit() {
+	fs := memfs.New()
+	w := &Worktree{
+		r:          s.Repository,
+		Filesystem: fs,
+	}
+
+	err := w.Checkout(&CheckoutOptions{})
+	s.NoError(err)
+
+	err = util.WriteFile(fs, "foo", []byte("foo"), 0644)
+	s.NoError(err)
+
+	_, err = w.Add("foo")
+	s.NoError(err)
+
+	prevHash, err := w.Commit("foo\n", &CommitOptions{Author: defaultSignature()})
+	s.NoError(err)
+
+	_, err = w.Commit("bar\n", &CommitOptions{Author: defaultSignature(), AllowEmptyCommits: true})
+	s.NoError(err)
+
+	amendedHash, err := w.Commit("foo\n", &CommitOptions{Author: defaultSignature(), Amend: true})
+	s.T().Log(prevHash, amendedHash)
+	s.ErrorIs(err, ErrEmptyCommit)
+	s.Equal(plumbing.ZeroHash, amendedHash)
+}
+
+func TestCount(t *testing.T) {
+	f := fixtures.Basic().One()
+	r := NewRepositoryWithEmptyWorktree(f)
+
+	iter, err := r.CommitObjects()
+	require.NoError(t, err)
+
+	count := 0
+	iter.ForEach(func(c *object.Commit) error {
+		count++
+		return nil
+	})
+	assert.Equal(t, 9, count, "commits mismatch")
+
+	trees, err := r.TreeObjects()
+	require.NoError(t, err)
+
+	count = 0
+	trees.ForEach(func(c *object.Tree) error {
+		count++
+		return nil
+	})
+	assert.Equal(t, 12, count, "trees mismatch")
+
+	blobs, err := r.BlobObjects()
+	require.NoError(t, err)
+
+	count = 0
+	blobs.ForEach(func(c *object.Blob) error {
+		count++
+		return nil
+	})
+	assert.Equal(t, 10, count, "blobs mismatch")
+
+	objects, err := r.Objects()
+	require.NoError(t, err)
+
+	count = 0
+	objects.ForEach(func(c object.Object) error {
+		count++
+		return nil
+	})
+	assert.Equal(t, 31, count, "objects mismatch")
+}
+
+func TestAddAndCommitWithSkipStatus(t *testing.T) {
+	expected := plumbing.NewHash("375a3808ffde7f129cdd3c8c252fd0fe37cfd13b")
+
+	f := fixtures.Basic().One()
+	fs := memfs.New()
+	r := NewRepositoryWithEmptyWorktree(f)
+	w := &Worktree{
+		r:          r,
+		Filesystem: fs,
+	}
+
+	err := w.Checkout(&CheckoutOptions{})
+	require.NoError(t, err)
+
+	util.WriteFile(fs, "LICENSE", []byte("foo"), 0644)
+	util.WriteFile(fs, "foo", []byte("foo"), 0644)
+
+	err = w.AddWithOptions(&AddOptions{
+		Path:       "foo",
+		SkipStatus: true,
+	})
+	require.NoError(t, err)
+
+	hash, err := w.Commit("commit foo only\n", &CommitOptions{
+		Author: defaultSignature(),
+	})
+
+	assert.Equal(t, expected.String(), hash.String())
+	require.NoError(t, err)
+
+	assertStorage(t, r, 13, 11, 10, expected)
+}
+
+func assertStorage(
+	t *testing.T, r *Repository,
+	treesCount, blobCount, commitCount int, head plumbing.Hash,
+) {
+	trees, err := r.Storer.IterEncodedObjects(plumbing.TreeObject)
+	require.NoError(t, err)
+	blobs, err := r.Storer.IterEncodedObjects(plumbing.BlobObject)
+	require.NoError(t, err)
+	commits, err := r.Storer.IterEncodedObjects(plumbing.CommitObject)
+	require.NoError(t, err)
+
+	assert.Equal(t, treesCount, lenIterEncodedObjects(trees), "trees count mismatch")
+	assert.Equal(t, blobCount, lenIterEncodedObjects(blobs), "blobs count mismatch")
+	assert.Equal(t, commitCount, lenIterEncodedObjects(commits), "commits count mismatch")
+
+	ref, err := r.Head()
+	require.NoError(t, err)
+	assert.Equal(t, head.String(), ref.Hash().String())
+}
+
+func (s *WorktreeSuite) TestAddAndCommitWithSkipStatusPathNotModified() {
+	expected := plumbing.NewHash("375a3808ffde7f129cdd3c8c252fd0fe37cfd13b")
+	expected2 := plumbing.NewHash("8691273baf8f6ee2cccfc05e910552c04d02d472")
+
+	fs := memfs.New()
+	w := &Worktree{
+		r:          s.Repository,
+		Filesystem: fs,
+	}
+
+	err := w.Checkout(&CheckoutOptions{})
+	s.NoError(err)
+
+	util.WriteFile(fs, "foo", []byte("foo"), 0644)
+
+	status, err := w.Status()
+	s.NoError(err)
+	foo := status.File("foo")
+	s.Equal(Untracked, foo.Staging)
+	s.Equal(Untracked, foo.Worktree)
+
+	err = w.AddWithOptions(&AddOptions{
+		Path:       "foo",
+		SkipStatus: true,
+	})
+	s.NoError(err)
+
+	status, err = w.Status()
+	s.NoError(err)
+	foo = status.File("foo")
+	s.Equal(Added, foo.Staging)
+	s.Equal(Unmodified, foo.Worktree)
+
+	hash, err := w.Commit("commit foo only\n", &CommitOptions{
+		All:    true,
+		Author: defaultSignature(),
+	})
+	s.Equal(expected, hash)
+	s.NoError(err)
+
+	commit1, err := w.r.CommitObject(hash)
+	s.NoError(err)
+
+	status, err = w.Status()
+	s.NoError(err)
+	foo = status.File("foo")
+	s.Equal(Untracked, foo.Staging)
+	s.Equal(Untracked, foo.Worktree)
+
+	assertStorageStatus(s, s.Repository, 13, 11, 10, expected)
+
+	err = w.AddWithOptions(&AddOptions{
+		Path:       "foo",
+		SkipStatus: true,
+	})
+	s.NoError(err)
+
+	status, err = w.Status()
+	s.NoError(err)
+	foo = status.File("foo")
+	s.Equal(Untracked, foo.Staging)
+	s.Equal(Untracked, foo.Worktree)
+
+	hash, err = w.Commit("commit with no changes\n", &CommitOptions{
+		Author:            defaultSignature(),
+		AllowEmptyCommits: true,
+	})
+	s.Equal(expected2, hash)
+	s.NoError(err)
+
+	commit2, err := w.r.CommitObject(hash)
+	s.NoError(err)
+
+	status, err = w.Status()
+	s.NoError(err)
+	foo = status.File("foo")
+	s.Equal(Untracked, foo.Staging)
+	s.Equal(Untracked, foo.Worktree)
+
+	patch, err := commit2.Patch(commit1)
+	s.NoError(err)
+	files := patch.FilePatches()
+	s.Nil(files)
+
+	assertStorageStatus(s, s.Repository, 13, 11, 11, expected2)
+}
+
+func (s *WorktreeSuite) TestCommitAll() {
 	expected := plumbing.NewHash("aede6f8c9c1c7ec9ca8d287c64b8ed151276fa28")
 
 	fs := memfs.New()
@@ -98,7 +477,7 @@ func (s *WorktreeSuite) TestCommitAll(c *C) {
 	}
 
 	err := w.Checkout(&CheckoutOptions{})
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
 	util.WriteFile(fs, "LICENSE", []byte("foo"), 0644)
 	util.WriteFile(fs, "foo", []byte("foo"), 0644)
@@ -108,13 +487,13 @@ func (s *WorktreeSuite) TestCommitAll(c *C) {
 		Author: defaultSignature(),
 	})
 
-	c.Assert(hash, Equals, expected)
-	c.Assert(err, IsNil)
+	s.Equal(expected, hash)
+	s.NoError(err)
 
-	assertStorageStatus(c, s.Repository, 13, 11, 10, expected)
+	assertStorageStatus(s, s.Repository, 13, 11, 10, expected)
 }
 
-func (s *WorktreeSuite) TestRemoveAndCommitAll(c *C) {
+func (s *WorktreeSuite) TestRemoveAndCommitAll() {
 	expected := plumbing.NewHash("907cd576c6ced2ecd3dab34a72bf9cf65944b9a9")
 
 	fs := memfs.New()
@@ -124,125 +503,124 @@ func (s *WorktreeSuite) TestRemoveAndCommitAll(c *C) {
 	}
 
 	err := w.Checkout(&CheckoutOptions{})
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
 	util.WriteFile(fs, "foo", []byte("foo"), 0644)
 	_, err = w.Add("foo")
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
 	_, errFirst := w.Commit("Add in Repo\n", &CommitOptions{
 		Author: defaultSignature(),
 	})
-	c.Assert(errFirst, IsNil)
+	s.Nil(errFirst)
 
 	errRemove := fs.Remove("foo")
-	c.Assert(errRemove, IsNil)
+	s.Nil(errRemove)
 
 	hash, errSecond := w.Commit("Remove foo\n", &CommitOptions{
 		All:    true,
 		Author: defaultSignature(),
 	})
-	c.Assert(errSecond, IsNil)
+	s.Nil(errSecond)
 
-	c.Assert(hash, Equals, expected)
-	c.Assert(err, IsNil)
+	s.Equal(expected, hash)
+	s.NoError(err)
 
-	assertStorageStatus(c, s.Repository, 13, 11, 11, expected)
+	assertStorageStatus(s, s.Repository, 13, 11, 11, expected)
 }
 
-func (s *WorktreeSuite) TestCommitSign(c *C) {
+func (s *WorktreeSuite) TestCommitSign() {
 	fs := memfs.New()
 	storage := memory.NewStorage()
 
 	r, err := Init(storage, fs)
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
 	w, err := r.Worktree()
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
 	util.WriteFile(fs, "foo", []byte("foo"), 0644)
 
 	_, err = w.Add("foo")
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
-	key := commitSignKey(c, true)
+	key := commitSignKey(s.T(), true)
 	hash, err := w.Commit("foo\n", &CommitOptions{Author: defaultSignature(), SignKey: key})
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
 	// Verify the commit.
 	pks := new(bytes.Buffer)
 	pkw, err := armor.Encode(pks, openpgp.PublicKeyType, nil)
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
 	err = key.Serialize(pkw)
-	c.Assert(err, IsNil)
+	s.NoError(err)
 	err = pkw.Close()
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
 	expectedCommit, err := r.CommitObject(hash)
-	c.Assert(err, IsNil)
+	s.NoError(err)
 	actual, err := expectedCommit.Verify(pks.String())
-	c.Assert(err, IsNil)
-	c.Assert(actual.PrimaryKey, DeepEquals, key.PrimaryKey)
+	s.NoError(err)
+	s.Equal(key.PrimaryKey, actual.PrimaryKey)
 }
 
-func (s *WorktreeSuite) TestCommitSignBadKey(c *C) {
+func (s *WorktreeSuite) TestCommitSignBadKey() {
 	fs := memfs.New()
 	storage := memory.NewStorage()
 
 	r, err := Init(storage, fs)
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
 	w, err := r.Worktree()
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
 	util.WriteFile(fs, "foo", []byte("foo"), 0644)
 
 	_, err = w.Add("foo")
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
-	key := commitSignKey(c, false)
+	key := commitSignKey(s.T(), false)
 	_, err = w.Commit("foo\n", &CommitOptions{Author: defaultSignature(), SignKey: key})
-	c.Assert(err, Equals, errors.InvalidArgumentError("signing key is encrypted"))
+	s.ErrorIs(err, errors.InvalidArgumentError("signing key is encrypted"))
 }
 
-func (s *WorktreeSuite) TestCommitTreeSort(c *C) {
-	path, err := ioutil.TempDir(os.TempDir(), "test-commit-tree-sort")
-	c.Assert(err, IsNil)
-	fs := osfs.New(path)
-	st := filesystem.NewStorage(fs, cache.NewObjectLRUDefault())
-	r, err := Init(st, nil)
-	c.Assert(err, IsNil)
+func (s *WorktreeSuite) TestCommitTreeSort() {
+	fs := s.TemporalFilesystem()
 
-	r, _ = Clone(memory.NewStorage(), memfs.New(), &CloneOptions{
-		URL: path,
+	st := filesystem.NewStorage(fs, cache.NewObjectLRUDefault())
+	_, err := Init(st, nil)
+	s.NoError(err)
+
+	r, _ := Clone(memory.NewStorage(), memfs.New(), &CloneOptions{
+		URL: fs.Root(),
 	})
 
 	w, err := r.Worktree()
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
 	mfs := w.Filesystem
 
 	err = mfs.MkdirAll("delta", 0755)
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
 	for _, p := range []string{"delta_last", "Gamma", "delta/middle", "Beta", "delta-first", "alpha"} {
 		util.WriteFile(mfs, p, []byte("foo"), 0644)
 		_, err = w.Add(p)
-		c.Assert(err, IsNil)
+		s.NoError(err)
 	}
 
 	_, err = w.Commit("foo\n", &CommitOptions{
 		All:    true,
 		Author: defaultSignature(),
 	})
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
 	err = r.Push(&PushOptions{})
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
 	cmd := exec.Command("git", "fsck")
-	cmd.Dir = path
+	cmd.Dir = fs.Root()
 	cmd.Env = os.Environ()
 	buf := &bytes.Buffer{}
 	cmd.Stderr = buf
@@ -250,27 +628,123 @@ func (s *WorktreeSuite) TestCommitTreeSort(c *C) {
 
 	err = cmd.Run()
 
-	c.Assert(err, IsNil, Commentf("%s", buf.Bytes()))
+	s.NoError(err, fmt.Sprintf("%s", buf.Bytes()))
+}
+
+// https://github.com/go-git/go-git/pull/224
+func (s *WorktreeSuite) TestJustStoreObjectsNotAlreadyStored() {
+	fs := s.TemporalFilesystem()
+
+	fsDotgit, err := fs.Chroot(".git") // real fs to get modified timestamps
+	s.NoError(err)
+	storage := filesystem.NewStorage(fsDotgit, cache.NewObjectLRUDefault())
+
+	r, err := Init(storage, fs)
+	s.NoError(err)
+
+	w, err := r.Worktree()
+	s.NoError(err)
+
+	// Step 1: Write LICENSE
+	util.WriteFile(fs, "LICENSE", []byte("license"), 0644)
+	hLicense, err := w.Add("LICENSE")
+	s.NoError(err)
+	s.Equal(plumbing.NewHash("0484eba0d41636ba71fa612c78559cd6c3006cde"), hLicense)
+
+	hash, err := w.Commit("commit 1\n", &CommitOptions{
+		All:    true,
+		Author: defaultSignature(),
+	})
+	s.NoError(err)
+	s.Equal(plumbing.NewHash("7a7faee4630d2664a6869677cc8ab614f3fd4a18"), hash)
+
+	infoLicense, err := fsDotgit.Stat(filepath.Join("objects", "04", "84eba0d41636ba71fa612c78559cd6c3006cde"))
+	s.NoError(err) // checking objects file exists
+
+	// Step 2: Write foo.
+	time.Sleep(5 * time.Millisecond) // uncool, but we need to get different timestamps...
+	util.WriteFile(fs, "foo", []byte("foo"), 0644)
+	hFoo, err := w.Add("foo")
+	s.NoError(err)
+	s.Equal(plumbing.NewHash("19102815663d23f8b75a47e7a01965dcdc96468c"), hFoo)
+
+	hash, err = w.Commit("commit 2\n", &CommitOptions{
+		All:    true,
+		Author: defaultSignature(),
+	})
+	s.NoError(err)
+	s.Equal(plumbing.NewHash("97c0c5177e6ac57d10e8ea0017f2d39b91e2b364"), hash)
+
+	// Step 3: Check
+	// There is no need to overwrite the object of LICENSE, because its content
+	// was not changed. Just a write on the object of foo is required. This behaviour
+	// is fixed by #224 and tested by comparing the timestamps of the stored objects.
+	infoFoo, err := fsDotgit.Stat(filepath.Join("objects", "19", "102815663d23f8b75a47e7a01965dcdc96468c"))
+	s.NoError(err)                                          // checking objects file exists
+	s.True(infoLicense.ModTime().Before(infoFoo.ModTime())) // object of foo has another/greaterThan timestamp than LICENSE
+
+	infoLicenseSecond, err := fsDotgit.Stat(filepath.Join("objects", "04", "84eba0d41636ba71fa612c78559cd6c3006cde"))
+	s.NoError(err)
+
+	log.Printf("comparing mod time: %v == %v on %v (%v)", infoLicenseSecond.ModTime(), infoLicense.ModTime(), runtime.GOOS, runtime.GOARCH)
+	s.Equal(infoLicense.ModTime(), infoLicenseSecond.ModTime()) // object of LICENSE should have the same timestamp because no additional write operation was performed
+}
+
+func (s *WorktreeSuite) TestCommitInvalidCharactersInAuthorInfos() {
+	f := fixtures.Basic().One()
+	s.Repository = NewRepositoryWithEmptyWorktree(f)
+
+	expected := plumbing.NewHash("e8eecef2524c3a37cf0f0996603162f81e0373f1")
+
+	fs := memfs.New()
+	storage := memory.NewStorage()
+
+	r, err := Init(storage, fs)
+	s.NoError(err)
+
+	w, err := r.Worktree()
+	s.NoError(err)
+
+	util.WriteFile(fs, "foo", []byte("foo"), 0644)
+
+	_, err = w.Add("foo")
+	s.NoError(err)
+
+	hash, err := w.Commit("foo\n", &CommitOptions{Author: invalidSignature()})
+	s.Equal(expected, hash)
+	s.NoError(err)
+
+	assertStorageStatus(s, r, 1, 1, 1, expected)
+
+	// Check HEAD commit contains author informations with '<', '>' and '\n' stripped
+	lr, err := r.Log(&LogOptions{})
+	s.NoError(err)
+
+	commit, err := lr.Next()
+	s.NoError(err)
+
+	s.Equal("foo bad", commit.Author.Name)
+	s.Equal("badfoo@foo.foo", commit.Author.Email)
 }
 
 func assertStorageStatus(
-	c *C, r *Repository,
+	s *WorktreeSuite, r *Repository,
 	treesCount, blobCount, commitCount int, head plumbing.Hash,
 ) {
 	trees, err := r.Storer.IterEncodedObjects(plumbing.TreeObject)
-	c.Assert(err, IsNil)
+	s.NoError(err)
 	blobs, err := r.Storer.IterEncodedObjects(plumbing.BlobObject)
-	c.Assert(err, IsNil)
+	s.NoError(err)
 	commits, err := r.Storer.IterEncodedObjects(plumbing.CommitObject)
-	c.Assert(err, IsNil)
+	s.NoError(err)
 
-	c.Assert(lenIterEncodedObjects(trees), Equals, treesCount)
-	c.Assert(lenIterEncodedObjects(blobs), Equals, blobCount)
-	c.Assert(lenIterEncodedObjects(commits), Equals, commitCount)
+	s.Equal(treesCount, lenIterEncodedObjects(trees))
+	s.Equal(blobCount, lenIterEncodedObjects(blobs))
+	s.Equal(commitCount, lenIterEncodedObjects(commits))
 
 	ref, err := r.Head()
-	c.Assert(err, IsNil)
-	c.Assert(ref.Hash(), Equals, head)
+	s.NoError(err)
+	s.Equal(head, ref.Hash())
 }
 
 func lenIterEncodedObjects(iter storer.EncodedObjectIter) int {
@@ -292,20 +766,29 @@ func defaultSignature() *object.Signature {
 	}
 }
 
-func commitSignKey(c *C, decrypt bool) *openpgp.Entity {
+func invalidSignature() *object.Signature {
+	when, _ := time.Parse(object.DateFormat, "Thu May 04 00:03:43 2017 +0200")
+	return &object.Signature{
+		Name:  "foo <bad>\n",
+		Email: "<bad>\nfoo@foo.foo",
+		When:  when,
+	}
+}
+
+func commitSignKey(t *testing.T, decrypt bool) *openpgp.Entity {
 	s := strings.NewReader(armoredKeyRing)
 	es, err := openpgp.ReadArmoredKeyRing(s)
-	c.Assert(err, IsNil)
+	assert.NoError(t, err)
 
-	c.Assert(es, HasLen, 1)
-	c.Assert(es[0].Identities, HasLen, 1)
+	assert.Len(t, es, 1)
+	assert.Len(t, es[0].Identities, 1)
 	_, ok := es[0].Identities["foo bar <foo@foo.foo>"]
-	c.Assert(ok, Equals, true)
+	assert.True(t, ok)
 
 	key := es[0]
 	if decrypt {
 		err = key.PrivateKey.Decrypt([]byte(keyPassphrase))
-		c.Assert(err, IsNil)
+		assert.NoError(t, err)
 	}
 
 	return key

@@ -1,42 +1,48 @@
 package git
 
 import (
+	"fmt"
+	"testing"
+
 	"github.com/jesseduffield/go-git/v5/plumbing"
 	"github.com/jesseduffield/go-git/v5/plumbing/object"
+	"github.com/stretchr/testify/suite"
 
 	fixtures "github.com/go-git/go-git-fixtures/v4"
-	. "gopkg.in/check.v1"
 )
 
 type BlameSuite struct {
+	suite.Suite
 	BaseSuite
 }
 
-var _ = Suite(&BlameSuite{})
+func TestBlameSuite(t *testing.T) {
+	suite.Run(t, new(BlameSuite))
+}
 
-func (s *BlameSuite) TestNewLines(c *C) {
+func (s *BlameSuite) TestNewLines() {
 	h := plumbing.NewHash("ce9f123d790717599aaeb76bc62510de437761be")
 	lines, err := newLines([]string{"foo"}, []*object.Commit{{
 		Hash:    h,
 		Message: "foo",
 	}})
 
-	c.Assert(err, IsNil)
-	c.Assert(lines, HasLen, 1)
-	c.Assert(lines[0].Text, Equals, "foo")
-	c.Assert(lines[0].Hash, Equals, h)
+	s.NoError(err)
+	s.Len(lines, 1)
+	s.Equal("foo", lines[0].Text)
+	s.Equal(h, lines[0].Hash)
 }
 
-func (s *BlameSuite) TestNewLinesWithNewLine(c *C) {
-	lines, err := newLines([]string{"foo"}, []*object.Commit{
+func (s *BlameSuite) TestNewLinesWithNewLine() {
+	lines, err := newLines([]string{"foo", ""}, []*object.Commit{
 		{Message: "foo"},
 		{Message: "bar"},
 	})
 
-	c.Assert(err, IsNil)
-	c.Assert(lines, HasLen, 2)
-	c.Assert(lines[0].Text, Equals, "foo")
-	c.Assert(lines[1].Text, Equals, "\n")
+	s.NoError(err)
+	s.Len(lines, 2)
+	s.Equal("foo", lines[0].Text)
+	s.Equal("", lines[1].Text)
 }
 
 type blameTest struct {
@@ -47,44 +53,45 @@ type blameTest struct {
 }
 
 // run a blame on all the suite's tests
-func (s *BlameSuite) TestBlame(c *C) {
+func (s *BlameSuite) TestBlame() {
 	for _, t := range blameTests {
 		r := s.NewRepositoryFromPackfile(fixtures.ByURL(t.repo).One())
 
-		exp := s.mockBlame(c, t, r)
+		exp := s.mockBlame(t, r)
 		commit, err := r.CommitObject(plumbing.NewHash(t.rev))
-		c.Assert(err, IsNil)
+		s.NoError(err)
 
 		obt, err := Blame(commit, t.path)
-		c.Assert(err, IsNil)
-		c.Assert(obt, DeepEquals, exp)
+		s.NoError(err)
+		s.Equal(exp, obt)
 
 		for i, l := range obt.Lines {
-			c.Assert(l.Hash.String(), Equals, t.blames[i])
+			s.Equal(t.blames[i], l.Hash.String())
 		}
 	}
 }
 
-func (s *BlameSuite) mockBlame(c *C, t blameTest, r *Repository) (blame *BlameResult) {
+func (s *BlameSuite) mockBlame(t blameTest, r *Repository) (blame *BlameResult) {
 	commit, err := r.CommitObject(plumbing.NewHash(t.rev))
-	c.Assert(err, IsNil, Commentf("%v: repo=%s, rev=%s", err, t.repo, t.rev))
+	s.NoError(err, fmt.Sprintf("%v: repo=%s, rev=%s", err, t.repo, t.rev))
 
 	f, err := commit.File(t.path)
-	c.Assert(err, IsNil)
+	s.NoError(err)
 	lines, err := f.Lines()
-	c.Assert(err, IsNil)
-	c.Assert(len(t.blames), Equals, len(lines), Commentf(
+	s.NoError(err)
+	s.Len(t.blames, len(lines), fmt.Sprintf(
 		"repo=%s, path=%s, rev=%s: the number of lines in the file and the number of expected blames differ (len(blames)=%d, len(lines)=%d)\nblames=%#q\nlines=%#q", t.repo, t.path, t.rev, len(t.blames), len(lines), t.blames, lines))
 
 	blamedLines := make([]*Line, 0, len(t.blames))
 	for i := range t.blames {
 		commit, err := r.CommitObject(plumbing.NewHash(t.blames[i]))
-		c.Assert(err, IsNil)
+		s.NoError(err)
 		l := &Line{
-			Author: commit.Author.Email,
-			Text:   lines[i],
-			Date:   commit.Author.When,
-			Hash:   commit.Hash,
+			Author:     commit.Author.Email,
+			AuthorName: commit.Author.Name,
+			Text:       lines[i],
+			Date:       commit.Author.When,
+			Hash:       commit.Hash,
 		}
 		blamedLines = append(blamedLines, l)
 	}
@@ -146,7 +153,11 @@ var blameTests = [...]blameTest{
 		repeat("6ecf0ef2c2dffb796033e5a02219af86ec6584e5", 7),
 	)},
 	/*
-		// Failed
+		// This fails due to the different diff tool being used to create the patches.
+		// For example in commit d4b48a39aba7d3bd3e8abef2274a95b112d1ae73 when "function echo_status()" is added:
+		// - 'git diff' adds the new "}\n\n" to the end of function and keeps the "}\n\n" beforehand blamed to the previous commit
+		// - our diff adds the new "}\n\n" before the function and reuses the existing "}\n\n" to close the new function
+		// the resultant file is the same, but it causes blame not to match.
 		{"https://github.com/spinnaker/spinnaker.git", "f39d86f59a0781f130e8de6b2115329c1fbe9545", "InstallSpinnaker.sh", concat(
 			repeat("ce9f123d790717599aaeb76bc62510de437761be", 2),
 			repeat("a47d0aaeda421f06df248ad65bd58230766bf118", 1),
@@ -341,7 +352,9 @@ var blameTests = [...]blameTest{
 		repeat("a24001f6938d425d0e7504bdf5d27fc866a85c3d", 185),
 	)},
 	/*
-		// Fail by 3
+		// This fails due to the different diff tool being used to create the patches.
+		// For commit c89dab0d42f1856d157357e9010f8cc6a12f5b1f our diff tool keeps an existing newline as moved in the file, whereas
+		// 'git diff' says the existing newline was deleted and a new one created.
 		{"https://github.com/spinnaker/spinnaker.git", "f39d86f59a0781f130e8de6b2115329c1fbe9545", "pylib/spinnaker/configurator.py", concat(
 			repeat("a24001f6938d425d0e7504bdf5d27fc866a85c3d", 53),
 			repeat("c89dab0d42f1856d157357e9010f8cc6a12f5b1f", 1),
@@ -423,65 +436,63 @@ var blameTests = [...]blameTest{
 		repeat("637ba49300f701cfbd859c1ccf13c4f39a9ba1c8", 1),
 		repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 13),
 	)},
+	{"https://github.com/spinnaker/spinnaker.git", "f39d86f59a0781f130e8de6b2115329c1fbe9545", "config/default-spinnaker-local.yml", concat(
+		repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 9),
+		repeat("5e09821cbd7d710405b61cab0a795c2982a71b9c", 2),
+		repeat("99534ecc895fe17a1d562bb3049d4168a04d0865", 1),
+		repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 2),
+		repeat("a596972a661d9a7deca8abd18b52ce1a39516e89", 1),
+		repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 5),
+		repeat("5e09821cbd7d710405b61cab0a795c2982a71b9c", 2),
+		repeat("a596972a661d9a7deca8abd18b52ce1a39516e89", 1),
+		repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 5),
+		repeat("5e09821cbd7d710405b61cab0a795c2982a71b9c", 1),
+		repeat("8980daf661408a3faa1f22c225702a5c1d11d5c9", 1),
+		repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 25),
+		repeat("caf6d62e8285d4681514dd8027356fb019bc97ff", 1),
+		repeat("eaf7614cad81e8ab5c813dd4821129d0c04ea449", 1),
+		repeat("caf6d62e8285d4681514dd8027356fb019bc97ff", 1),
+		repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 24),
+		repeat("974b775a8978b120ff710cac93a21c7387b914c9", 2),
+		repeat("3ce7b902a51bac2f10994f7d1f251b616c975e54", 1),
+		repeat("5a2a845bc08974a36d599a4a4b7e25be833823b0", 6),
+		repeat("41e96c54a478e5d09dd07ed7feb2d8d08d8c7e3c", 14),
+		repeat("7c8d9a6081d9cb7a56c479bfe64d70540ea32795", 5),
+		repeat("5a2a845bc08974a36d599a4a4b7e25be833823b0", 2),
+	)},
+	{"https://github.com/spinnaker/spinnaker.git", "f39d86f59a0781f130e8de6b2115329c1fbe9545", "config/spinnaker.yml", concat(
+		repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 32),
+		repeat("41e96c54a478e5d09dd07ed7feb2d8d08d8c7e3c", 2),
+		repeat("5a2a845bc08974a36d599a4a4b7e25be833823b0", 1),
+		repeat("41e96c54a478e5d09dd07ed7feb2d8d08d8c7e3c", 6),
+		repeat("5a2a845bc08974a36d599a4a4b7e25be833823b0", 2),
+		repeat("41e96c54a478e5d09dd07ed7feb2d8d08d8c7e3c", 2),
+		repeat("5a2a845bc08974a36d599a4a4b7e25be833823b0", 2),
+		repeat("41e96c54a478e5d09dd07ed7feb2d8d08d8c7e3c", 3),
+		repeat("7c8d9a6081d9cb7a56c479bfe64d70540ea32795", 3),
+		repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 50),
+		repeat("974b775a8978b120ff710cac93a21c7387b914c9", 2),
+		repeat("d4553dac205023fa77652308af1a2d1cf52138fb", 1),
+		repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 9),
+		repeat("caf6d62e8285d4681514dd8027356fb019bc97ff", 1),
+		repeat("eaf7614cad81e8ab5c813dd4821129d0c04ea449", 1),
+		repeat("caf6d62e8285d4681514dd8027356fb019bc97ff", 1),
+		repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 39),
+		repeat("079e42e7c979541b6fab7343838f7b9fd4a360cd", 6),
+		repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 15),
+	)},
 	/*
-		// fail a few lines
-		{"https://github.com/spinnaker/spinnaker.git", "f39d86f59a0781f130e8de6b2115329c1fbe9545", "config/default-spinnaker-local.yml", concat(
-			repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 9),
-			repeat("5e09821cbd7d710405b61cab0a795c2982a71b9c", 2),
-			repeat("99534ecc895fe17a1d562bb3049d4168a04d0865", 1),
-			repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 2),
-			repeat("a596972a661d9a7deca8abd18b52ce1a39516e89", 1),
-			repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 5),
-			repeat("5e09821cbd7d710405b61cab0a795c2982a71b9c", 2),
-			repeat("a596972a661d9a7deca8abd18b52ce1a39516e89", 1),
-			repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 5),
-			repeat("5e09821cbd7d710405b61cab0a795c2982a71b9c", 1),
-			repeat("8980daf661408a3faa1f22c225702a5c1d11d5c9", 1),
-			repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 25),
-			repeat("caf6d62e8285d4681514dd8027356fb019bc97ff", 1),
-			repeat("eaf7614cad81e8ab5c813dd4821129d0c04ea449", 1),
-			repeat("caf6d62e8285d4681514dd8027356fb019bc97ff", 1),
-			repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 24),
-			repeat("974b775a8978b120ff710cac93a21c7387b914c9", 2),
-			repeat("3ce7b902a51bac2f10994f7d1f251b616c975e54", 1),
-			repeat("5a2a845bc08974a36d599a4a4b7e25be833823b0", 6),
-			repeat("41e96c54a478e5d09dd07ed7feb2d8d08d8c7e3c", 14),
-			repeat("7c8d9a6081d9cb7a56c479bfe64d70540ea32795", 5),
-			repeat("5a2a845bc08974a36d599a4a4b7e25be833823b0", 2),
-		)},
-	*/
-	/*
-		// fail one line
-		{"https://github.com/spinnaker/spinnaker.git", "f39d86f59a0781f130e8de6b2115329c1fbe9545", "config/spinnaker.yml", concat(
-			repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 32),
-			repeat("41e96c54a478e5d09dd07ed7feb2d8d08d8c7e3c", 2),
-			repeat("5a2a845bc08974a36d599a4a4b7e25be833823b0", 1),
-			repeat("41e96c54a478e5d09dd07ed7feb2d8d08d8c7e3c", 6),
-			repeat("5a2a845bc08974a36d599a4a4b7e25be833823b0", 2),
-			repeat("41e96c54a478e5d09dd07ed7feb2d8d08d8c7e3c", 2),
-			repeat("5a2a845bc08974a36d599a4a4b7e25be833823b0", 2),
-			repeat("41e96c54a478e5d09dd07ed7feb2d8d08d8c7e3c", 3),
-			repeat("7c8d9a6081d9cb7a56c479bfe64d70540ea32795", 3),
-			repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 50),
-			repeat("974b775a8978b120ff710cac93a21c7387b914c9", 2),
-			repeat("d4553dac205023fa77652308af1a2d1cf52138fb", 1),
-			repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 9),
-			repeat("caf6d62e8285d4681514dd8027356fb019bc97ff", 1),
-			repeat("eaf7614cad81e8ab5c813dd4821129d0c04ea449", 1),
-			repeat("caf6d62e8285d4681514dd8027356fb019bc97ff", 1),
-			repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 39),
-			repeat("079e42e7c979541b6fab7343838f7b9fd4a360cd", 6),
-			repeat("ae904e8d60228c21c47368f6a10f1cc9ca3aeebf", 15),
-		)},
-	*/
-	/*
+		// This fails due to the different diff tool being used to create the patches
+		// For commit d1ff4e13e9e0b500821aa558373878f93487e34b our diff tool keeps an existing newline as moved in the file, whereas
+		// 'git diff' says the existing newline was deleted and a new one created
 		{"https://github.com/spinnaker/spinnaker.git", "f39d86f59a0781f130e8de6b2115329c1fbe9545", "dev/install_development.sh", concat(
 			repeat("99534ecc895fe17a1d562bb3049d4168a04d0865", 1),
 			repeat("d1ff4e13e9e0b500821aa558373878f93487e34b", 71),
 		)},
 	*/
 	/*
-		// FAIL two lines interchanged
+		// This fails due to the different diff tool being used to create the patches
+		// For commit 838aed816872c52ed435e4876a7b64dba0bed500 the diff tools assign the "fi\n" to different line numbers
 		{"https://github.com/spinnaker/spinnaker.git", "f39d86f59a0781f130e8de6b2115329c1fbe9545", "dev/bootstrap_dev.sh", concat(
 			repeat("a24001f6938d425d0e7504bdf5d27fc866a85c3d", 95),
 			repeat("838aed816872c52ed435e4876a7b64dba0bed500", 1),
@@ -542,10 +553,7 @@ var blameTests = [...]blameTest{
 			repeat("838aed816872c52ed435e4876a7b64dba0bed500", 8),
 		)},
 	*/
-	/*
-		// FAIL move?
-		{"https://github.com/spinnaker/spinnaker.git", "f39d86f59a0781f130e8de6b2115329c1fbe9545", "dev/create_google_dev_vm.sh", concat(
-			repeat("a24001f6938d425d0e7504bdf5d27fc866a85c3d", 20),
-		)},
-	*/
+	{"https://github.com/spinnaker/spinnaker.git", "f39d86f59a0781f130e8de6b2115329c1fbe9545", "dev/create_google_dev_vm.sh", concat(
+		repeat("a24001f6938d425d0e7504bdf5d27fc866a85c3d", 20),
+	)},
 }

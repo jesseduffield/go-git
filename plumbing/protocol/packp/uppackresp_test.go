@@ -2,34 +2,38 @@ package packp
 
 import (
 	"bytes"
-	"io/ioutil"
+	"io"
+	"testing"
 
 	"github.com/jesseduffield/go-git/v5/plumbing"
 	"github.com/jesseduffield/go-git/v5/plumbing/protocol/packp/capability"
-
-	. "gopkg.in/check.v1"
+	"github.com/stretchr/testify/suite"
 )
 
-type UploadPackResponseSuite struct{}
+type UploadPackResponseSuite struct {
+	suite.Suite
+}
 
-var _ = Suite(&UploadPackResponseSuite{})
+func TestUploadPackResponseSuite(t *testing.T) {
+	suite.Run(t, new(UploadPackResponseSuite))
+}
 
-func (s *UploadPackResponseSuite) TestDecodeNAK(c *C) {
+func (s *UploadPackResponseSuite) TestDecodeNAK() {
 	raw := "0008NAK\nPACK"
 
 	req := NewUploadPackRequest()
 	res := NewUploadPackResponse(req)
 	defer res.Close()
 
-	err := res.Decode(ioutil.NopCloser(bytes.NewBufferString(raw)))
-	c.Assert(err, IsNil)
+	err := res.Decode(io.NopCloser(bytes.NewBufferString(raw)))
+	s.NoError(err)
 
-	pack, err := ioutil.ReadAll(res)
-	c.Assert(err, IsNil)
-	c.Assert(pack, DeepEquals, []byte("PACK"))
+	pack, err := io.ReadAll(res)
+	s.NoError(err)
+	s.Equal([]byte("PACK"), pack)
 }
 
-func (s *UploadPackResponseSuite) TestDecodeDepth(c *C) {
+func (s *UploadPackResponseSuite) TestDecodeDepth() {
 	raw := "00000008NAK\nPACK"
 
 	req := NewUploadPackRequest()
@@ -38,15 +42,15 @@ func (s *UploadPackResponseSuite) TestDecodeDepth(c *C) {
 	res := NewUploadPackResponse(req)
 	defer res.Close()
 
-	err := res.Decode(ioutil.NopCloser(bytes.NewBufferString(raw)))
-	c.Assert(err, IsNil)
+	err := res.Decode(io.NopCloser(bytes.NewBufferString(raw)))
+	s.NoError(err)
 
-	pack, err := ioutil.ReadAll(res)
-	c.Assert(err, IsNil)
-	c.Assert(pack, DeepEquals, []byte("PACK"))
+	pack, err := io.ReadAll(res)
+	s.NoError(err)
+	s.Equal([]byte("PACK"), pack)
 }
 
-func (s *UploadPackResponseSuite) TestDecodeMalformed(c *C) {
+func (s *UploadPackResponseSuite) TestDecodeMalformed() {
 	raw := "00000008ACK\nPACK"
 
 	req := NewUploadPackRequest()
@@ -55,22 +59,22 @@ func (s *UploadPackResponseSuite) TestDecodeMalformed(c *C) {
 	res := NewUploadPackResponse(req)
 	defer res.Close()
 
-	err := res.Decode(ioutil.NopCloser(bytes.NewBufferString(raw)))
-	c.Assert(err, NotNil)
+	err := res.Decode(io.NopCloser(bytes.NewBufferString(raw)))
+	s.NotNil(err)
 }
 
-func (s *UploadPackResponseSuite) TestDecodeMultiACK(c *C) {
+func (s *UploadPackResponseSuite) TestDecodeMultiACK() {
 	req := NewUploadPackRequest()
 	req.Capabilities.Set(capability.MultiACK)
 
 	res := NewUploadPackResponse(req)
 	defer res.Close()
 
-	err := res.Decode(ioutil.NopCloser(bytes.NewBuffer(nil)))
-	c.Assert(err, NotNil)
+	err := res.Decode(io.NopCloser(bytes.NewBuffer(nil)))
+	s.NoError(err)
 }
 
-func (s *UploadPackResponseSuite) TestReadNoDecode(c *C) {
+func (s *UploadPackResponseSuite) TestReadNoDecode() {
 	req := NewUploadPackRequest()
 	req.Capabilities.Set(capability.MultiACK)
 
@@ -78,49 +82,91 @@ func (s *UploadPackResponseSuite) TestReadNoDecode(c *C) {
 	defer res.Close()
 
 	n, err := res.Read(nil)
-	c.Assert(err, Equals, ErrUploadPackResponseNotDecoded)
-	c.Assert(n, Equals, 0)
+	s.ErrorIs(err, ErrUploadPackResponseNotDecoded)
+	s.Equal(0, n)
 }
 
-func (s *UploadPackResponseSuite) TestEncodeNAK(c *C) {
-	pf := ioutil.NopCloser(bytes.NewBuffer([]byte("[PACK]")))
+func (s *UploadPackResponseSuite) TestEncodeNAK() {
+	pf := io.NopCloser(bytes.NewBuffer([]byte("[PACK]")))
 	req := NewUploadPackRequest()
 	res := NewUploadPackResponseWithPackfile(req, pf)
-	defer func() { c.Assert(res.Close(), IsNil) }()
+	defer func() { s.Nil(res.Close()) }()
 
+	go func() {
+		req.UploadPackCommands <- UploadPackCommand{
+			Acks: []UploadPackRequestAck{},
+			Done: true,
+		}
+		close(req.UploadPackCommands)
+	}()
 	b := bytes.NewBuffer(nil)
-	c.Assert(res.Encode(b), IsNil)
+	s.Nil(res.Encode(b))
 
 	expected := "0008NAK\n[PACK]"
-	c.Assert(b.String(), Equals, expected)
+	s.Equal(expected, b.String())
 }
 
-func (s *UploadPackResponseSuite) TestEncodeDepth(c *C) {
-	pf := ioutil.NopCloser(bytes.NewBuffer([]byte("PACK")))
+func (s *UploadPackResponseSuite) TestEncodeDepth() {
+	pf := io.NopCloser(bytes.NewBuffer([]byte("PACK")))
 	req := NewUploadPackRequest()
 	req.Depth = DepthCommits(1)
 
 	res := NewUploadPackResponseWithPackfile(req, pf)
-	defer func() { c.Assert(res.Close(), IsNil) }()
+	defer func() { s.Nil(res.Close()) }()
 
+	go func() {
+		req.UploadPackCommands <- UploadPackCommand{
+			Acks: []UploadPackRequestAck{},
+			Done: true,
+		}
+		close(req.UploadPackCommands)
+	}()
 	b := bytes.NewBuffer(nil)
-	c.Assert(res.Encode(b), IsNil)
+	s.Nil(res.Encode(b))
 
 	expected := "00000008NAK\nPACK"
-	c.Assert(b.String(), Equals, expected)
+	s.Equal(expected, b.String())
 }
 
-func (s *UploadPackResponseSuite) TestEncodeMultiACK(c *C) {
-	pf := ioutil.NopCloser(bytes.NewBuffer([]byte("[PACK]")))
+func (s *UploadPackResponseSuite) TestEncodeMultiACK() {
+	pf := io.NopCloser(bytes.NewBuffer([]byte("[PACK]")))
 	req := NewUploadPackRequest()
+	req.Capabilities.Set(capability.MultiACK)
 
 	res := NewUploadPackResponseWithPackfile(req, pf)
-	defer func() { c.Assert(res.Close(), IsNil) }()
-	res.ACKs = []plumbing.Hash{
-		plumbing.NewHash("5dc01c595e6c6ec9ccda4f6f69c131c0dd945f81"),
-		plumbing.NewHash("5dc01c595e6c6ec9ccda4f6f69c131c0dd945f82"),
-	}
-
+	defer func() { s.Nil(res.Close()) }()
+	go func() {
+		req.UploadPackCommands <- UploadPackCommand{
+			Acks: []UploadPackRequestAck{
+				{Hash: plumbing.NewHash("5dc01c595e6c6ec9ccda4f6f69c131c0dd945f81")},
+				{Hash: plumbing.NewHash("5dc01c595e6c6ec9ccda4f6f69c131c0dd945f82"), IsCommon: true},
+			},
+		}
+		req.UploadPackCommands <- UploadPackCommand{
+			Acks: []UploadPackRequestAck{},
+			Done: true,
+		}
+		close(req.UploadPackCommands)
+	}()
 	b := bytes.NewBuffer(nil)
-	c.Assert(res.Encode(b), NotNil)
+	s.Nil(res.Encode(b))
+
+	expected := "003aACK 5dc01c595e6c6ec9ccda4f6f69c131c0dd945f82 continue\n" +
+		"0008NAK\n" +
+		"0031ACK 5dc01c595e6c6ec9ccda4f6f69c131c0dd945f82\n" +
+		"[PACK]"
+	s.Equal(expected, b.String())
+}
+
+func FuzzDecoder(f *testing.F) {
+	f.Add([]byte("0045ACK 5dc01c595e6c6ec9ccda4f6f69c131c0dd945f81\n"))
+	f.Add([]byte("003aACK5dc01c595e6c6ec9ccda4f6f69c131c0dd945f82 \n0008NAK\n0"))
+
+	f.Fuzz(func(t *testing.T, input []byte) {
+		req := NewUploadPackRequest()
+		res := NewUploadPackResponse(req)
+		defer res.Close()
+
+		res.Decode(io.NopCloser(bytes.NewReader(input)))
+	})
 }

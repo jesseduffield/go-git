@@ -1,21 +1,19 @@
 package ssh
 
 import (
-	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"net"
 	"os"
 	"os/user"
 	"path/filepath"
 
 	"github.com/jesseduffield/go-git/v5/plumbing/transport"
+	"github.com/jesseduffield/go-git/v5/plumbing/transport/ssh/knownhosts"
+	"github.com/jesseduffield/go-git/v5/plumbing/transport/ssh/sshagent"
+	"github.com/jesseduffield/go-git/v5/utils/trace"
 
-	"github.com/mitchellh/go-homedir"
-	sshagent "github.com/xanzy/ssh-agent"
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 const DefaultUsername = "git"
@@ -58,6 +56,7 @@ func (a *KeyboardInteractive) String() string {
 }
 
 func (a *KeyboardInteractive) ClientConfig() (*ssh.ClientConfig, error) {
+	trace.SSH.Printf("ssh: %s user=%s", KeyboardInteractiveName, a.User)
 	return a.SetHostKeyCallback(&ssh.ClientConfig{
 		User: a.User,
 		Auth: []ssh.AuthMethod{
@@ -82,6 +81,7 @@ func (a *Password) String() string {
 }
 
 func (a *Password) ClientConfig() (*ssh.ClientConfig, error) {
+	trace.SSH.Printf("ssh: %s user=%s", PasswordName, a.User)
 	return a.SetHostKeyCallback(&ssh.ClientConfig{
 		User: a.User,
 		Auth: []ssh.AuthMethod{ssh.Password(a.Password)},
@@ -105,6 +105,7 @@ func (a *PasswordCallback) String() string {
 }
 
 func (a *PasswordCallback) ClientConfig() (*ssh.ClientConfig, error) {
+	trace.SSH.Printf("ssh: %s user=%s", PasswordCallbackName, a.User)
 	return a.SetHostKeyCallback(&ssh.ClientConfig{
 		User: a.User,
 		Auth: []ssh.AuthMethod{ssh.PasswordCallback(a.Callback)},
@@ -121,27 +122,15 @@ type PublicKeys struct {
 // NewPublicKeys returns a PublicKeys from a PEM encoded private key. An
 // encryption password should be given if the pemBytes contains a password
 // encrypted PEM block otherwise password should be empty. It supports RSA
-// (PKCS#1), DSA (OpenSSL), and ECDSA private keys.
+// (PKCS#1), PKCS#8, DSA (OpenSSL), and ECDSA private keys.
 func NewPublicKeys(user string, pemBytes []byte, password string) (*PublicKeys, error) {
-	block, _ := pem.Decode(pemBytes)
-	if block == nil {
-		return nil, errors.New("invalid PEM data")
-	}
-	if x509.IsEncryptedPEMBlock(block) {
-		key, err := x509.DecryptPEMBlock(block, []byte(password))
-		if err != nil {
-			return nil, err
-		}
-
-		block = &pem.Block{Type: block.Type, Bytes: key}
-		pemBytes = pem.EncodeToMemory(block)
-	}
-
 	signer, err := ssh.ParsePrivateKey(pemBytes)
+	if _, ok := err.(*ssh.PassphraseMissingError); ok {
+		signer, err = ssh.ParsePrivateKeyWithPassphrase(pemBytes, []byte(password))
+	}
 	if err != nil {
 		return nil, err
 	}
-
 	return &PublicKeys{User: user, Signer: signer}, nil
 }
 
@@ -149,7 +138,7 @@ func NewPublicKeys(user string, pemBytes []byte, password string) (*PublicKeys, 
 // encoded private key. An encryption password should be given if the pemBytes
 // contains a password encrypted PEM block otherwise password should be empty.
 func NewPublicKeysFromFile(user, pemFile, password string) (*PublicKeys, error) {
-	bytes, err := ioutil.ReadFile(pemFile)
+	bytes, err := os.ReadFile(pemFile)
 	if err != nil {
 		return nil, err
 	}
@@ -166,6 +155,9 @@ func (a *PublicKeys) String() string {
 }
 
 func (a *PublicKeys) ClientConfig() (*ssh.ClientConfig, error) {
+	trace.SSH.Printf("ssh: %s user=%s signer=\"%s %s\"", PublicKeysName, a.User,
+		a.Signer.PublicKey().Type(),
+		ssh.FingerprintSHA256(a.Signer.PublicKey()))
 	return a.SetHostKeyCallback(&ssh.ClientConfig{
 		User: a.User,
 		Auth: []ssh.AuthMethod{ssh.PublicKeys(a.Signer)},
@@ -176,8 +168,10 @@ func username() (string, error) {
 	var username string
 	if user, err := user.Current(); err == nil {
 		username = user.Username
+		trace.SSH.Printf("ssh: Falling back to current user name %q", username)
 	} else {
 		username = os.Getenv("USER")
+		trace.SSH.Printf("ssh: Falling back to environment variable USER %q", username)
 	}
 
 	if username == "" {
@@ -227,9 +221,10 @@ func (a *PublicKeysCallback) String() string {
 }
 
 func (a *PublicKeysCallback) ClientConfig() (*ssh.ClientConfig, error) {
+	trace.SSH.Printf("ssh: %s user=%s", PublicKeysCallbackName, a.User)
 	return a.SetHostKeyCallback(&ssh.ClientConfig{
 		User: a.User,
-		Auth: []ssh.AuthMethod{ssh.PublicKeysCallback(a.Callback)},
+		Auth: []ssh.AuthMethod{tracePublicKeysCallback(a.Callback)},
 	})
 }
 
@@ -238,34 +233,43 @@ func (a *PublicKeysCallback) ClientConfig() (*ssh.ClientConfig, error) {
 //
 // If list of files is empty, then it will be read from the SSH_KNOWN_HOSTS
 // environment variable, example:
-//   /home/foo/custom_known_hosts_file:/etc/custom_known/hosts_file
+//
+//	/home/foo/custom_known_hosts_file:/etc/custom_known/hosts_file
 //
 // If SSH_KNOWN_HOSTS is not set the following file locations will be used:
-//   ~/.ssh/known_hosts
-//   /etc/ssh/ssh_known_hosts
+//
+//	~/.ssh/known_hosts
+//	/etc/ssh/ssh_known_hosts
 func NewKnownHostsCallback(files ...string) (ssh.HostKeyCallback, error) {
-	var err error
+	db, err := newKnownHostsDb(files...)
+	return db.HostKeyCallback(), err
+}
 
+func newKnownHostsDb(files ...string) (*knownhosts.HostKeyDB, error) {
+	var err error
 	if len(files) == 0 {
 		if files, err = getDefaultKnownHostsFiles(); err != nil {
 			return nil, err
 		}
 	}
+	trace.SSH.Printf("ssh: known_hosts sources %s", files)
 
 	if files, err = filterKnownHostsFiles(files...); err != nil {
 		return nil, err
 	}
+	trace.SSH.Printf("ssh: filtered known_hosts sources %s", files)
 
-	return knownhosts.New(files...)
+	return knownhosts.NewDB(files...)
 }
 
 func getDefaultKnownHostsFiles() ([]string, error) {
 	files := filepath.SplitList(os.Getenv("SSH_KNOWN_HOSTS"))
 	if len(files) != 0 {
+		trace.SSH.Printf("ssh: loading known_hosts from SSH_KNOWN_HOSTS")
 		return files, nil
 	}
 
-	homeDirPath, err := homedir.Dir()
+	homeDirPath, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
 	}
@@ -310,13 +314,40 @@ type HostKeyCallbackHelper struct {
 // HostKeyCallback is empty a default callback is created using
 // NewKnownHostsCallback.
 func (m *HostKeyCallbackHelper) SetHostKeyCallback(cfg *ssh.ClientConfig) (*ssh.ClientConfig, error) {
-	var err error
 	if m.HostKeyCallback == nil {
-		if m.HostKeyCallback, err = NewKnownHostsCallback(); err != nil {
+		db, err := newKnownHostsDb()
+		if err != nil {
 			return cfg, err
 		}
+		m.HostKeyCallback = db.HostKeyCallback()
 	}
 
-	cfg.HostKeyCallback = m.HostKeyCallback
+	cfg.HostKeyCallback = m.traceHostKeyCallback
 	return cfg, nil
+}
+
+func (m *HostKeyCallbackHelper) traceHostKeyCallback(hostname string, remote net.Addr, key ssh.PublicKey) error {
+	trace.SSH.Printf(
+		`ssh: hostkey callback hostname=%s remote=%s pubkey="%s %s"`,
+		hostname, remote, key.Type(), ssh.FingerprintSHA256(key))
+	return m.HostKeyCallback(hostname, remote, key)
+}
+
+func tracePublicKeysCallback(getSigners func() ([]ssh.Signer, error)) ssh.AuthMethod {
+	signers, err := getSigners()
+	if err != nil {
+		trace.SSH.Printf("ssh: error calling getSigners: %v", err)
+	}
+	if len(signers) == 0 {
+		trace.SSH.Printf("ssh: no signers found")
+	}
+	for _, s := range signers {
+		trace.SSH.Printf("ssh: found key: %s %s", s.PublicKey().Type(),
+			ssh.FingerprintSHA256(s.PublicKey()))
+	}
+
+	cb := func() ([]ssh.Signer, error) {
+		return signers, err
+	}
+	return ssh.PublicKeysCallback(cb)
 }

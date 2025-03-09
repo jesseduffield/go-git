@@ -2,32 +2,41 @@ package packp
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"testing"
 
 	"github.com/jesseduffield/go-git/v5/plumbing/format/pktline"
-
-	. "gopkg.in/check.v1"
+	"github.com/stretchr/testify/assert"
 )
 
-func Test(t *testing.T) { TestingT(t) }
-
 // returns a byte slice with the pkt-lines for the given payloads.
-func pktlines(c *C, payloads ...string) []byte {
+func pktlines(t *testing.T, payloads ...string) []byte {
 	var buf bytes.Buffer
-	e := pktline.NewEncoder(&buf)
 
-	err := e.EncodeString(payloads...)
-	c.Assert(err, IsNil, Commentf("building pktlines for %v\n", payloads))
+	comment := fmt.Sprintf("building pktlines for %v\n", payloads)
+	for _, p := range payloads {
+		if p == "" {
+			assert.NoError(t, pktline.WriteFlush(&buf), comment)
+		} else {
+			_, err := pktline.WriteString(&buf, p)
+			assert.NoError(t, err, comment)
+		}
+	}
 
 	return buf.Bytes()
 }
 
-func toPktLines(c *C, payloads []string) io.Reader {
+func toPktLines(t *testing.T, payloads []string) io.Reader {
 	var buf bytes.Buffer
-	e := pktline.NewEncoder(&buf)
-	err := e.EncodeString(payloads...)
-	c.Assert(err, IsNil)
+	for _, p := range payloads {
+		if p == "" {
+			assert.Nil(t, pktline.WriteFlush(&buf))
+		} else {
+			_, err := pktline.WriteString(&buf, p)
+			assert.NoError(t, err)
+		}
+	}
 
 	return &buf
 }

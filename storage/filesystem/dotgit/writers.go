@@ -9,6 +9,7 @@ import (
 	"github.com/jesseduffield/go-git/v5/plumbing/format/idxfile"
 	"github.com/jesseduffield/go-git/v5/plumbing/format/objfile"
 	"github.com/jesseduffield/go-git/v5/plumbing/format/packfile"
+	"github.com/jesseduffield/go-git/v5/plumbing/hash"
 
 	"github.com/go-git/go-billy/v5"
 )
@@ -18,7 +19,7 @@ import (
 // this operation is synchronized with the write operations.
 // The packfile is written in a temp file, when Close is called this file
 // is renamed/moved (depends on the Filesystem implementation) to the final
-// location, if the PackWriter is not used, nothing is written
+// location, if the PackWriter is not used, nothing is written.
 type PackWriter struct {
 	Notify func(plumbing.Hash, *idxfile.Writer)
 
@@ -55,23 +56,19 @@ func newPackWrite(fs billy.Filesystem) (*PackWriter, error) {
 }
 
 func (w *PackWriter) buildIndex() {
-	s := packfile.NewScanner(w.synced)
 	w.writer = new(idxfile.Writer)
 	var err error
-	w.parser, err = packfile.NewParser(s, w.writer)
+
+	w.parser = packfile.NewParser(w.synced, packfile.WithScannerObservers(w.writer))
+
+	h, err := w.parser.Parse()
 	if err != nil {
 		w.result <- err
 		return
 	}
 
-	checksum, err := w.parser.Parse()
-	if err != nil {
-		w.result <- err
-		return
-	}
-
-	w.checksum = checksum
-	w.result <- err
+	w.checksum = h
+	w.result <- nil
 }
 
 // waitBuildIndex waits until buildIndex function finishes, this can terminate
@@ -277,8 +274,8 @@ func (w *ObjectWriter) Close() error {
 }
 
 func (w *ObjectWriter) save() error {
-	hash := w.Hash().String()
-	file := w.fs.Join(objectsPath, hash[0:2], hash[2:40])
+	hex := w.Hash().String()
+	file := w.fs.Join(objectsPath, hex[0:2], hex[2:hash.HexSize])
 
 	return w.fs.Rename(w.f.Name(), file)
 }
