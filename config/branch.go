@@ -112,7 +112,7 @@ func (b *Branch) unmarshal(s *format.Subsection) error {
 	b.Rebase = b.raw.Options.Get(rebaseKey)
 	b.Description = unquoteDescription(b.raw.Options.Get(descriptionKey))
 
-	return b.Validate()
+	return nil
 }
 
 // hack to enable conditional quoting in the
