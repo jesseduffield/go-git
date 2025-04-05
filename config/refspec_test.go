@@ -51,6 +51,12 @@ func (s *RefSpecSuite) TestRefSpecIsForceUpdate(c *C) {
 
 	spec = RefSpec("refs/heads/*:refs/remotes/origin/*")
 	c.Assert(spec.IsForceUpdate(), Equals, false)
+
+	spec = RefSpec(":refs/heads/master")
+	c.Assert(spec.IsForceUpdate(), Equals, false)
+
+	spec = RefSpec("^refs/head/test")
+	c.Assert(spec.IsForceUpdate(), Equals, false)
 }
 
 func (s *RefSpecSuite) TestRefSpecIsDelete(c *C) {
@@ -62,6 +68,23 @@ func (s *RefSpecSuite) TestRefSpecIsDelete(c *C) {
 
 	spec = RefSpec("refs/heads/*:refs/remotes/origin/*")
 	c.Assert(spec.IsDelete(), Equals, false)
+
+	spec = RefSpec("^refs/head/test")
+	c.Assert(spec.IsDelete(), Equals, false)
+}
+
+func (s *RefSpecSuite) TestRefSpecIsNegative(c *C) {
+	spec := RefSpec("^refs/head/test")
+	c.Assert(spec.IsNegative(), Equals, true)
+
+	spec = RefSpec("^refs/head/test/*")
+	c.Assert(spec.IsNegative(), Equals, true)
+
+	spec = RefSpec("+refs/heads/*:refs/remotes/origin/*")
+	c.Assert(spec.IsNegative(), Equals, false)
+
+	spec = RefSpec(":refs/heads/master")
+	c.Assert(spec.IsNegative(), Equals, false)
 }
 
 func (s *RefSpecSuite) TestRefSpecIsExactSHA1(c *C) {
@@ -70,6 +93,9 @@ func (s *RefSpecSuite) TestRefSpecIsExactSHA1(c *C) {
 
 	spec = RefSpec("12039e008f9a4e3394f3f94f8ea897785cb09448:refs/heads/foo")
 	c.Assert(spec.IsExactSHA1(), Equals, true)
+
+	spec = RefSpec("^refs/head/test")
+	c.Assert("refs/head/test", Equals, spec.Src())
 }
 
 func (s *RefSpecSuite) TestRefSpecSrc(c *C) {
