@@ -92,15 +92,20 @@ func (s RefSpec) IsNegative() bool {
 // Src returns the src side.
 func (s RefSpec) Src() string {
 	spec := string(s)
+	var start, end int
 
-	var start int
 	if s.IsForceUpdate() || s.IsNegative() {
 		start = 1
 	} else {
 		start = 0
 	}
 
-	end := strings.Index(spec, refSpecSeparator)
+	if s.IsNegative() {
+		end = len(s)
+	} else {
+		end = strings.Index(spec, refSpecSeparator)
+	}
+
 	return spec[start:end]
 }
 
